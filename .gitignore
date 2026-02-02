@@ -40,4 +40,12 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# generated prisma client
 /lib/generated/prisma
+
+# internal documentation (keep only README.md)
+PHASE*.md
+PLAN.md
+DEBUGGING-REPORT.md
+*.md
+!README.md
