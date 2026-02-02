@@ -1,0 +1,146 @@
+// Fooxchange Database Schema
+// Production-grade schema for recipe sharing platform
+// See PLAN.md for architecture details
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model - Managed by Clerk for auth, but we store additional metadata
+model User {
+  id        String   @id @default(cuid()) // Using cuid for better distribution
+  clerkId   String   @unique // Clerk user ID for auth mapping
+  email     String   @unique
+  name      String
+  avatarUrl String?
+  bio       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  recipes       Recipe[] // Recipes authored by this user
+  savedRecipes  SavedRecipe[] // Recipes saved/favorited by user
+
+  @@index([clerkId])
+  @@index([email])
+}
+
+// Recipe model - Core entity
+model Recipe {
+  id          String   @id @default(cuid())
+  title       String
+  description String   @db.Text
+  imageUrl    String?
+  prepTime    Int? // in minutes
+  cookTime    Int? // in minutes
+  servings    Int      @default(4)
+  difficulty  Difficulty @default(EASY)
+  
+  // Foreign keys
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  ingredients RecipeIngredient[]
+  steps       Step[]
+  savedBy     SavedRecipe[]
+
+  // Indexes for performance
+  @@index([authorId])
+  @@index([difficulty])
+  @@index([createdAt]) // For sorting by newest
+}
+
+// Ingredient model - Normalized ingredient catalog
+model Ingredient {
+  id        String   @id @default(cuid())
+  name      String   @unique // Normalized name e.g., "Tomato"
+  slug      String   @unique // URL-friendly e.g., "tomato"
+  category  String? // e.g., "Vegetable", "Spice", "Dairy"
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  recipes   RecipeIngredient[]
+
+  @@index([slug])
+  @@index([category])
+}
+
+// Join table for many-to-many between Recipe and Ingredient
+// Includes additional metadata like quantity
+model RecipeIngredient {
+  id           String @id @default(cuid())
+  
+  recipeId     String
+  recipe       Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  
+  amount       String // e.g., "2 cups", "1 tbsp", "to taste"
+  isOptional   Boolean @default(false)
+  
+  createdAt    DateTime @default(now())
+
+  // Composite unique constraint - each ingredient can appear only once per recipe
+  @@unique([recipeId, ingredientId])
+  @@index([recipeId])
+  @@index([ingredientId])
+}
+
+// Step model - Ordered cooking instructions
+model Step {
+  id        String   @id @default(cuid())
+  
+  recipeId  String
+  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  
+  order     Int // Step number (1, 2, 3, etc.)
+  content   String   @db.Text // The instruction text
+  imageUrl  String? // Optional step-specific image
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Unique constraint - each recipe can have each step number only once
+  @@unique([recipeId, order])
+  @@index([recipeId])
+}
+
+// SavedRecipe - User's saved/favorited recipes
+model SavedRecipe {
+  id        String   @id @default(cuid())
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  recipeId  String
+  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  
+  savedAt   DateTime @default(now())
+
+  // Prevent duplicate saves
+  @@unique([userId, recipeId])
+  @@index([userId])
+  @@index([recipeId])
+}
+
+// Enums
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
