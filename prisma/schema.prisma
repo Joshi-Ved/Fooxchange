@@ -26,6 +26,7 @@ model User {
   // Relations
   recipes       Recipe[] // Recipes authored by this user
   savedRecipes  SavedRecipe[] // Recipes saved/favorited by user
+  visionLogs    VisionLog[] // Vision scan history
 
   @@index([clerkId])
   @@index([email])
@@ -51,9 +52,10 @@ model Recipe {
   updatedAt   DateTime @updatedAt
 
   // Relations
-  ingredients RecipeIngredient[]
-  steps       Step[]
-  savedBy     SavedRecipe[]
+  ingredients     RecipeIngredient[]
+  steps           Step[]
+  savedBy         SavedRecipe[]
+  recipeEmbedding RecipeEmbedding?
 
   // Indexes for performance
   @@index([authorId])
@@ -72,7 +74,8 @@ model Ingredient {
   updatedAt DateTime @updatedAt
 
   // Relations
-  recipes   RecipeIngredient[]
+  recipes              RecipeIngredient[]
+  ingredientEmbedding  IngredientEmbedding?
 
   @@index([slug])
   @@index([category])
@@ -135,6 +138,69 @@ model SavedRecipe {
   @@unique([userId, recipeId])
   @@index([userId])
   @@index([recipeId])
+}
+
+// ============================================
+// PHASE 2: AI Vision & Vector Search Models
+// ============================================
+
+// IngredientEmbedding - Stores vector representations of ingredients
+// Used for semantic matching (e.g., "cilantro" matches "coriander")
+model IngredientEmbedding {
+  id           String   @id @default(cuid())
+  
+  ingredientId String   @unique
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  
+  // Vector representation (OpenAI text-embedding-3-small uses 1536 dimensions)
+  embedding    String   @db.Text // Stored as JSON array, converted to pgvector in queries
+  
+  // Metadata for enhanced matching
+  metadata     Json?    // { flavorProfile: ["spicy", "aromatic"], synonyms: [...] }
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@index([ingredientId])
+}
+
+// RecipeEmbedding - Stores vector representations of entire recipes
+// Used for semantic recipe discovery ("I want something comforting")
+model RecipeEmbedding {
+  id        String   @id @default(cuid())
+  
+  recipeId  String   @unique
+  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  
+  // Vector combining title + description + ingredients
+  embedding String   @db.Text // Stored as JSON array
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([recipeId])
+}
+
+// VisionLog - Analytics and debugging for computer vision feature
+// Helps improve accuracy over time
+model VisionLog {
+  id             String   @id @default(cuid())
+  
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  imageUrl       String?  // Temporary URL (auto-deleted after 24h)
+  detectedItems  Json     // Array of detected ingredients with confidence scores
+  latencyMs      Int      // Processing time for performance monitoring
+  
+  // User feedback (did they confirm/edit the results?)
+  userConfirmed  Boolean  @default(false)
+  userEdits      Json?    // What corrections user made
+  
+  createdAt      DateTime @default(now())
+  
+  @@index([userId])
+  @@index([createdAt]) // For analytics queries
 }
 
 // Enums

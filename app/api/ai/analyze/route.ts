@@ -1,60 +1,98 @@
 /**
  * Recipe Analysis API - AI-powered insights
  * POST /api/ai/analyze
+ * 
+ * Security: Authentication required, rate limited, input validated
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { auth } from '@clerk/nextjs/server';
 import { db } from '@/lib/db';
 import {
     predictCookingDifficulty,
     estimateNutrition,
     generateCookingTips,
 } from '@/lib/services/ml-service';
+import { analyzeRecipeSchema } from '@/lib/validations/api-validations';
+import {
+    checkRateLimit,
+    RateLimitPresets,
+    getClientIdentifier,
+    rateLimitExceededResponse
+} from '@/lib/middleware/rate-limit';
+import {
+    handleApiError,
+    authError,
+    validationError,
+    notFoundError,
+    successResponse
+} from '@/lib/utils/error-handling';
 
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
     try {
-        const session = { user: { id: 'demo-user' } }; // Demo for testing
+        // 1. Authentication check
+        const { userId } = await auth();
 
-        const { recipeId } = await req.json();
-
-        if (!recipeId) {
-            return NextResponse.json(
-                { error: 'Recipe ID is required' },
-                { status: 400 }
-            );
+        if (!userId) {
+            return authError('Please sign in to analyze recipes');
         }
 
-        // Fetch recipe
-        const recipe = await db.recipe.findUnique({
-            where: { id: recipeId },
-            include: {
-                ingredients: {
-                    include: {
-                        ingredient: true,
+        // 2. Rate limiting
+        const identifier = getClientIdentifier(req, userId);
+        const rateLimit = await checkRateLimit(identifier, RateLimitPresets.ai);
+
+        if (!rateLimit.success) {
+            return rateLimitExceededResponse(rateLimit);
+        }
+
+        // 3. Parse and validate request
+        const body = await req.json();
+        const validatedData = analyzeRecipeSchema.parse(body);
+
+        // 4. Fetch recipe with timeout
+        const recipe = await Promise.race([
+            db.recipe.findUnique({
+                where: { id: validatedData.recipeId },
+                include: {
+                    ingredients: {
+                        include: {
+                            ingredient: true,
+                        },
+                    },
+                    steps: {
+                        orderBy: {
+                            order: 'asc',
+                        },
                     },
                 },
-            },
-        });
+            }),
+            new Promise<null>((_, reject) =>
+                setTimeout(() => reject(new Error('Database timeout')), 5000)
+            )
+        ]);
 
         if (!recipe) {
-            return NextResponse.json(
-                { error: 'Recipe not found' },
-                { status: 404 }
-            );
+            return notFoundError('Recipe');
         }
 
-        // Run ML analysis in parallel
-        const [difficulty, nutrition, tips] = await Promise.all([
+        // 5. Run ML analysis in parallel with timeout
+        const analysisPromise = Promise.all([
             predictCookingDifficulty(recipe),
             estimateNutrition(recipe),
             generateCookingTips(recipe),
         ]);
 
-        return NextResponse.json({
-            success: true,
-            recipeId,
+        const [difficulty, nutrition, tips] = await Promise.race([
+            analysisPromise,
+            new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Analysis timeout')), 30000)
+            )
+        ]);
+
+        return successResponse({
+            recipeId: validatedData.recipeId,
             analysis: {
                 difficulty,
                 nutrition,
@@ -62,13 +100,15 @@ export async function POST(req: NextRequest) {
             },
         });
     } catch (error) {
-        console.error('Analysis API error:', error);
-        return NextResponse.json(
-            {
-                error: 'Analysis failed',
-                details: error instanceof Error ? error.message : 'Unknown error',
-            },
-            { status: 500 }
+        // Handle Zod validation errors
+        if (error && typeof error === 'object' && 'issues' in error) {
+            return validationError('Invalid request data', error);
+        }
+
+        return handleApiError(
+            error,
+            'Analysis failed. Please try again.',
+            500
         );
     }
 }

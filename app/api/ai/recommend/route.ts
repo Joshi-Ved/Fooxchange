@@ -1,51 +1,75 @@
 /**
  * AI Recommendations API
  * POST /api/ai/recommend
+ * 
+ * Security: Authentication required, rate limited, input validated
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { auth } from '@clerk/nextjs/server';
 import {
     getIntelligentRecommendations,
-    UserPreferences,
 } from '@/lib/services/ml-service';
+import { recommendationsSchema } from '@/lib/validations/api-validations';
+import {
+    checkRateLimit,
+    RateLimitPresets,
+    getClientIdentifier,
+    rateLimitExceededResponse
+} from '@/lib/middleware/rate-limit';
+import {
+    handleApiError,
+    authError,
+    validationError,
+    successResponse
+} from '@/lib/utils/error-handling';
 
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
     try {
-        const session = { user: { id: 'demo-user' } }; // Demo for testing
+        // 1. Authentication check
+        const { userId } = await auth();
 
-        const body = await req.json();
-        const { ingredients, preferences, limit = 10 } = body;
-
-        if (!ingredients || !Array.isArray(ingredients)) {
-            return NextResponse.json(
-                { error: 'Ingredients array is required' },
-                { status: 400 }
-            );
+        if (!userId) {
+            return authError('Please sign in to get personalized recommendations');
         }
 
-        // Get intelligent recommendations
+        // 2. Rate limiting
+        const identifier = getClientIdentifier(req, userId);
+        const rateLimit = await checkRateLimit(identifier, RateLimitPresets.ai);
+
+        if (!rateLimit.success) {
+            return rateLimitExceededResponse(rateLimit);
+        }
+
+        // 3. Parse and validate request body
+        const body = await req.json();
+        const validatedData = recommendationsSchema.parse(body);
+
+        // 4. Get intelligent recommendations
         const recommendations = await getIntelligentRecommendations(
-            session.user.id,
-            ingredients,
-            preferences as UserPreferences,
-            limit
+            userId,
+            validatedData.ingredients,
+            validatedData.preferences || {},
+            validatedData.limit
         );
 
-        return NextResponse.json({
-            success: true,
+        return successResponse({
             recommendations,
             count: recommendations.length,
         });
     } catch (error) {
-        console.error('Recommendation API error:', error);
-        return NextResponse.json(
-            {
-                error: 'Failed to generate recommendations',
-                details: error instanceof Error ? error.message : 'Unknown error',
-            },
-            { status: 500 }
+        // Handle Zod validation errors
+        if (error && typeof error === 'object' && 'issues' in error) {
+            return validationError('Invalid request data', error);
+        }
+
+        return handleApiError(
+            error,
+            'Failed to generate recommendations. Please try again.',
+            500
         );
     }
 }
+

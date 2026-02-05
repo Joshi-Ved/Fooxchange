@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="152" height="152" viewBox="0 0 152 152" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#16a34a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#059669;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="152" height="152" fill="url(#grad)" rx="22.8"/>
+  
+  <!-- Chef Hat Design -->
+  <g transform="translate(76, 76)">
+    <!-- Hat top puff -->
+    <circle cx="0" cy="-18.24" r="24.32" fill="white" opacity="0.95"/>
+    
+    <!-- Left puff -->
+    <circle cx="-18.24" cy="-6.08" r="18.24" fill="white" opacity="0.95"/>
+    
+    <!-- Right puff -->
+    <circle cx="18.24" cy="-6.08" r="18.24" fill="white" opacity="0.95"/>
+    
+    <!-- Hat band -->
+    <rect x="-30.400000000000002" y="6.08" width="60.800000000000004" height="12.16" fill="white" opacity="0.95" rx="3.04"/>
+    
+    <!-- Food elements (fork and spoon crossed) -->
+    <!-- Fork -->
+    <g opacity="0.3">
+      <rect x="-22.8" y="22.8" width="6.08" height="27.36" fill="white" rx="1.52"/>
+      <rect x="-25.840000000000003" y="22.8" width="2.28" height="12.16" fill="white"/>
+      <rect x="-19.76" y="22.8" width="2.28" height="12.16" fill="white"/>
+    </g>
+    
+    <!-- Spoon -->
+    <g opacity="0.3">
+      <circle cx="18.24" cy="28.88" r="3.8000000000000003" fill="white"/>
+      <rect x="15.200000000000001" y="31.919999999999998" width="6.08" height="18.24" fill="white" rx="1.52"/>
+    </g>
+  </g>
+</svg>

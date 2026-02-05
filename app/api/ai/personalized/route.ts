@@ -1,75 +1,125 @@
 /**
  * Personalized Feed API
  * GET /api/ai/personalized
+ * 
+ * Security: Authentication required, rate limited, input validated
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { auth } from '@clerk/nextjs/server';
 import {
     learnUserTasteProfile,
     getCollaborativeRecommendations,
     predictUserPreferences,
 } from '@/lib/services/dl-service';
 import { db } from '@/lib/db';
+import { personalizedFeedSchema } from '@/lib/validations/api-validations';
+import {
+    checkRateLimit,
+    RateLimitPresets,
+    getClientIdentifier,
+    rateLimitExceededResponse
+} from '@/lib/middleware/rate-limit';
+import {
+    handleApiError,
+    authError,
+    validationError,
+    successResponse
+} from '@/lib/utils/error-handling';
 
 export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
     try {
-        const session = { user: { id: 'demo-user' } }; // Demo for testing
+        // 1. Authentication check
+        const { userId } = await auth();
 
+        if (!userId) {
+            return authError('Please sign in to get your personalized feed');
+        }
+
+        // 2. Rate limiting
+        const identifier = getClientIdentifier(req, userId);
+        const rateLimit = await checkRateLimit(identifier, RateLimitPresets.ai);
+
+        if (!rateLimit.success) {
+            return rateLimitExceededResponse(rateLimit);
+        }
+
+        // 3. Parse and validate query params
         const { searchParams } = new URL(req.url);
         const limit = parseInt(searchParams.get('limit') || '20');
+        const includeReasons = searchParams.get('includeReasons') === 'true';
 
-        // Learn user's taste profile
-        const tasteProfile = await learnUserTasteProfile(session.user.id);
-
-        // Get collaborative recommendations
-        const collaborativeRecs = await getCollaborativeRecommendations(
-            session.user.id,
-            limit
-        );
-
-        // Get recent recipes as candidates for prediction
-        const recentRecipes = await db.recipe.findMany({
-            take: 100,
-            orderBy: {
-                createdAt: 'desc',
-            },
-            include: {
-                author: {
-                    select: {
-                        name: true,
-                        avatarUrl: true,
-                    },
-                },
-                ingredients: {
-                    include: {
-                        ingredient: true,
-                    },
-                },
-                _count: {
-                    select: {
-                        savedBy: true,
-                    },
-                },
-            },
+        const validatedData = personalizedFeedSchema.parse({
+            limit,
+            includeReasons,
         });
 
-        // Predict user preferences
-        const predictions = await predictUserPreferences(
-            session.user.id,
-            recentRecipes
-        );
+        // 4. Learn user's taste profile with timeout
+        const tasteProfile = await Promise.race([
+            learnUserTasteProfile(userId),
+            new Promise<any>((_, reject) =>
+                setTimeout(() => reject(new Error('Taste profile timeout')), 10000)
+            )
+        ]);
 
-        // Combine and deduplicate
+        // 5. Get collaborative recommendations with timeout
+        const collaborativeRecs = await Promise.race([
+            getCollaborativeRecommendations(userId, validatedData.limit),
+            new Promise<any[]>((_, reject) =>
+                setTimeout(() => reject(new Error('Collaborative timeout')), 10000)
+            )
+        ]);
+
+        // 6. Get recent recipes as candidates for prediction
+        const recentRecipes = await Promise.race([
+            db.recipe.findMany({
+                take: 100,
+                orderBy: {
+                    createdAt: 'desc',
+                },
+                include: {
+                    author: {
+                        select: {
+                            name: true,
+                            avatarUrl: true,
+                        },
+                    },
+                    ingredients: {
+                        include: {
+                            ingredient: true,
+                        },
+                    },
+                    _count: {
+                        select: {
+                            savedBy: true,
+                        },
+                    },
+                },
+            }),
+            new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Database timeout')), 5000)
+            )
+        ]);
+
+        // 7. Predict user preferences with timeout
+        const predictions = await Promise.race([
+            predictUserPreferences(userId, recentRecipes),
+            new Promise<any[]>((_, reject) =>
+                setTimeout(() => reject(new Error('Prediction timeout')), 15000)
+            )
+        ]);
+
+        // 8. Combine and deduplicate
         const feedRecipes = [
-            ...predictions.slice(0, limit / 2).map((p) => ({
+            ...predictions.slice(0, Math.floor(validatedData.limit / 2)).map((p) => ({
                 recipe: p.recipe,
                 score: p.predictedScore,
                 reason: `${Math.round(p.predictedScore * 100)}% match based on your taste`,
                 confidence: p.confidence,
             })),
-            ...collaborativeRecs.slice(0, limit / 2).map((recipe) => ({
+            ...collaborativeRecs.slice(0, Math.floor(validatedData.limit / 2)).map((recipe) => ({
                 recipe,
                 score: 0.8,
                 reason: 'Recommended by users with similar tastes',
@@ -80,22 +130,23 @@ export async function GET(req: NextRequest) {
         // Deduplicate by recipe ID
         const uniqueRecipes = Array.from(
             new Map(feedRecipes.map((item) => [item.recipe.id, item])).values()
-        ).slice(0, limit);
+        ).slice(0, validatedData.limit);
 
-        return NextResponse.json({
-            success: true,
+        return successResponse({
             tasteProfile,
             feed: uniqueRecipes,
             count: uniqueRecipes.length,
         });
     } catch (error) {
-        console.error('Personalized feed error:', error);
-        return NextResponse.json(
-            {
-                error: 'Failed to generate personalized feed',
-                details: error instanceof Error ? error.message : 'Unknown error',
-            },
-            { status: 500 }
+        // Handle Zod validation errors
+        if (error && typeof error === 'object' && 'issues' in error) {
+            return validationError('Invalid request parameters', error);
+        }
+
+        return handleApiError(
+            error,
+            'Failed to generate personalized feed. Please try again.',
+            500
         );
     }
 }

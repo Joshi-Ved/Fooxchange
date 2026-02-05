@@ -10,11 +10,21 @@
 
 import OpenAI from 'openai';
 
-// Initialize OpenAI client
+// Lazy initialize OpenAI client to prevent build-time errors
 // API key should be in environment variables
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+let openaiClient: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+    if (!openaiClient) {
+        if (!process.env.OPENAI_API_KEY) {
+            throw new Error('OPENAI_API_KEY environment variable is not set');
+        }
+        openaiClient = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY,
+        });
+    }
+    return openaiClient;
+}
 
 /**
  * Generate embedding vector for text
@@ -28,7 +38,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
             throw new Error('Text cannot be empty for embedding generation');
         }
 
-        const response = await openai.embeddings.create({
+        const response = await getOpenAIClient().embeddings.create({
             model: 'text-embedding-3-small',
             input: text.trim(),
             encoding_format: 'float',
