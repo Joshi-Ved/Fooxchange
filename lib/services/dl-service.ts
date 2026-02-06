@@ -62,12 +62,27 @@ export async function learnUserTasteProfile(userId: string): Promise<UserTastePr
         const cuisines = new Map<string, number>();
         let totalCookTime = 0;
         let totalDifficulty = 0;
+        let spiceScore = 0;
+
+        // Common spicy ingredients for detection
+        const spicyIngredients = new Set([
+            'chili', 'pepper', 'jalapeno', 'habanero', 'cayenne', 'paprika',
+            'hot sauce', 'sriracha', 'wasabi', 'ginger', 'garlic', 'horseradish',
+            'curry', 'tabasco', 'red pepper flakes', 'chipotle', 'serrano'
+        ]);
 
         savedRecipes.forEach(({ recipe }) => {
             // Count ingredients
             recipe.ingredients.forEach(({ ingredient }) => {
                 const count = ingredientFrequency.get(ingredient.name) || 0;
                 ingredientFrequency.set(ingredient.name, count + 1);
+
+                // Detect spicy ingredients
+                const ingredientLower = ingredient.name.toLowerCase();
+                if (spicyIngredients.has(ingredientLower) ||
+                    Array.from(spicyIngredients).some(spicy => ingredientLower.includes(spicy))) {
+                    spiceScore++;
+                }
             });
 
             // Track cooking time
@@ -95,6 +110,10 @@ export async function learnUserTasteProfile(userId: string): Promise<UserTastePr
 
         const avgCookingTime = totalCookTime / savedRecipes.length;
 
+        // Calculate spice level (0-10 scale)
+        // Based on frequency of spicy ingredients across recipes
+        const spiceLevel = Math.min(10, Math.round((spiceScore / savedRecipes.length) * 3));
+
         return {
             favoriteIngredients: sortedIngredients,
             cuisinePreferences: Array.from(cuisines.entries())
@@ -106,7 +125,7 @@ export async function learnUserTasteProfile(userId: string): Promise<UserTastePr
                 })),
             difficultyPreference,
             avgCookingTime,
-            spiceLevel: 5, // TODO: Implement spice detection
+            spiceLevel,
         };
     } catch (error) {
         console.error('Error learning taste profile:', error);

@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
         const [difficulty, nutrition, tips] = await Promise.race([
             analysisPromise,
             new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Analysis timeout')), 30000)
+                setTimeout(() => reject(new Error('Analysis timeout')), 10000) // 10-second max timeout
             )
         ]);
 

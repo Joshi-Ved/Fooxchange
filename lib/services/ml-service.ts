@@ -1,15 +1,26 @@
 /**
  * ML Service - Advanced Machine Learning Features
- * 
+ *
  * Provides intelligent recipe recommendations, nutritional analysis,
  * cooking time predictions, and personalized suggestions.
+ *
+ * Note: Cloud AI (Gemini) is deprecated per PLAN3.md - migrating to Edge AI
  */
 
 import { db } from '@/lib/db';
 import { generateEmbedding, cosineSimilarity } from './embedding-service';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+// Optional: Gemini AI (deprecated, use Edge AI instead per PLAN3.md)
+// Kept for backward compatibility during migration
+let genAI: any = null;
+try {
+    if (process.env.GEMINI_API_KEY) {
+        const { GoogleGenerativeAI } = require('@google/generative-ai');
+        genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    }
+} catch (error) {
+    console.warn('[ML Service] Gemini AI not available. Using fallback methods.');
+}
 
 export interface UserPreferences {
     dietaryRestrictions?: string[];

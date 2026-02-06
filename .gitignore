@@ -30,8 +30,15 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files - NEVER commit real credentials
+.env
+.env.local
+.env*.local
+.env.development
+.env.production
+# Allow .env.example files for documentation
+!.env.example
+!.env.local.example
 
 # vercel
 .vercel
@@ -46,6 +53,11 @@ next-env.d.ts
 # internal documentation (keep only README.md)
 PHASE*.md
 PLAN.md
+PLAN2.md
 DEBUGGING-REPORT.md
 *.md
 !README.md
+!PLAN3.md
+
+# temporary files created by Claude Code
+tmpclaude-*

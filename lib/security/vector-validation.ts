@@ -102,13 +102,13 @@ export function validateVector(
         sumSquares += val * val;
     }
 
-    // Check 4: Range validation
+    // Check 4: Strict range validation [-1.0, 1.0]
     if (strictRange) {
-        if (min < -1.5 || max > 1.5) {
+        if (min < -1.0 || max > 1.0) {
             result.valid = false;
             result.errors.push(
-                `Values out of expected range: min=${min.toFixed(4)}, max=${max.toFixed(4)}. ` +
-                `Expected values between -1.0 and 1.0`
+                `Values out of valid range: min=${min.toFixed(4)}, max=${max.toFixed(4)}. ` +
+                `Expected strict range [-1.0, 1.0]`
             );
         }
     }

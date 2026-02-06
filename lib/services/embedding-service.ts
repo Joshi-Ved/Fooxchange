@@ -1,29 +1,23 @@
 /**
- * Embedding Service
- * 
- * Handles generating vector embeddings for recipes and ingredients
- * using OpenAI's text-embedding-3-small model.
- * 
- * Vector embeddings allow semantic search - finding similar items
- * based on meaning rather than exact keyword matches.
+ * Embedding Service (DEPRECATED - Use Edge Search instead per PLAN3.md)
+ *
+ * Legacy cloud-based embeddings using OpenAI's text-embedding-3-small.
+ * Migrating to client-side Transformers.js for zero-cost, privacy-first approach.
+ *
+ * @deprecated Use Transformers.js (Xenova/all-MiniLM-L6-v2) for new integrations
  */
 
-import OpenAI from 'openai';
-
-// Lazy initialize OpenAI client to prevent build-time errors
-// API key should be in environment variables
-let openaiClient: OpenAI | null = null;
-
-function getOpenAIClient(): OpenAI {
-    if (!openaiClient) {
-        if (!process.env.OPENAI_API_KEY) {
-            throw new Error('OPENAI_API_KEY environment variable is not set');
-        }
-        openaiClient = new OpenAI({
+// Optional OpenAI import (for backward compatibility during migration)
+let openai: any = null;
+try {
+    if (process.env.OPENAI_API_KEY) {
+        const OpenAI = require('openai');
+        openai = new OpenAI({
             apiKey: process.env.OPENAI_API_KEY,
         });
     }
-    return openaiClient;
+} catch (error) {
+    console.warn('[Embedding Service] OpenAI not available. Use Transformers.js (Edge Search) instead.');
 }
 
 /**
@@ -38,7 +32,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
             throw new Error('Text cannot be empty for embedding generation');
         }
 
-        const response = await getOpenAIClient().embeddings.create({
+        const response = await openai.embeddings.create({
             model: 'text-embedding-3-small',
             input: text.trim(),
             encoding_format: 'float',

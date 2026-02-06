@@ -4,35 +4,8 @@ const nextConfig: NextConfig = {
   // Security: Limit request body size to prevent DoS attacks
   experimental: {
     serverActions: {
-      bodySizeLimit: '2mb', // Limit for server actions
+      bodySizeLimit: '50kb', // Strict limit for recipe metadata
     },
-  },
-
-  // Webpack configuration for AI models (TensorFlow.js, Transformers.js)
-  webpack: (config, { isServer }) => {
-    // Handle WASM files for TensorFlow.js
-    config.experiments = {
-      ...config.experiments,
-      asyncWebAssembly: true,
-      layers: true,
-    };
-
-    // Handle ONNX model files for Transformers.js
-    config.module.rules.push({
-      test: /\.onnx$/,
-      type: 'asset/resource',
-    });
-
-    // Handle binary files
-    config.module.rules.push({
-      test: /\.(wasm|onnx)$/,
-      type: 'asset/resource',
-      generator: {
-        filename: 'static/chunks/[path][name].[hash][ext]',
-      },
-    });
-
-    return config;
   },
 
   // Security headers
@@ -67,14 +40,14 @@ const nextConfig: NextConfig = {
           },
           {
             key: 'Permissions-Policy',
-            value: 'camera=(self), microphone=(), geolocation=()' // Allow camera for ingredient scanning
+            value: 'camera=(self), microphone=(), geolocation=(), payment=(), usb=(), vr=(), xr=()' // Allow camera only, block everything else
           },
           {
             // Content Security Policy for Edge AI (TensorFlow.js, Transformers.js)
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'", // WASM for TensorFlow.js
+              "script-src 'self' 'wasm-unsafe-eval'", // WASM for TensorFlow.js (removed unsafe-eval)
               "worker-src 'self' blob:", // WebWorkers for AI inference
               "img-src 'self' data: blob: https://utfs.io https://img.clerk.com", // Camera captures + UploadThing + Clerk avatars
               "style-src 'self' 'unsafe-inline'", // Required for some UI libraries
@@ -93,7 +66,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: 'Access-Control-Allow-Origin',
-            value: process.env.ALLOWED_ORIGINS || '*' // Configure in production
+            value: process.env.ALLOWED_ORIGINS || 'https://fooxchange.com' // NO wildcard - explicit origin required
           },
           {
             key: 'Access-Control-Allow-Methods',

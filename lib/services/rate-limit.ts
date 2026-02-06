@@ -1,9 +1,11 @@
 /**
  * Rate Limiting Service
- * 
+ *
  * Implements server-side rate limiting for AI endpoints
  * Supports different limits for free and pro users
  */
+
+import { db } from '@/lib/db';
 
 interface RateLimitConfig {
     maxRequests: number;
@@ -104,12 +106,34 @@ export const RATE_LIMITS = {
 
 /**
  * Get user tier (free or pro)
- * TODO: Implement actual tier checking from database/auth
+ *
+ * Checks user subscription status from database.
+ * Falls back to 'free' if user not found or no subscription.
+ *
+ * TODO: Add subscription field to Prisma schema and integrate with payment provider
+ * For now, returns 'free' for all users until subscription system is implemented
  */
-export function getUserTier(userId: string): 'free' | 'pro' {
-    // For now, all users are free
-    // In production, check user subscription status
-    return 'free';
+export async function getUserTier(userId: string): Promise<'free' | 'pro'> {
+    try {
+        // Check if user exists
+        const user = await db.user.findUnique({
+            where: { clerkId: userId },
+        });
+
+        if (!user) {
+            return 'free';
+        }
+
+        // TODO: Once subscription field is added to User model:
+        // Check (user as any).subscription.status === 'active' && tier === 'pro'
+
+        // Default to free tier until subscription system is implemented
+        return 'free';
+    } catch (error) {
+        console.error('Error checking user tier:', error);
+        // Safe fallback: if we can't determine tier, use free (more restrictive)
+        return 'free';
+    }
 }
 
 /**
@@ -119,7 +143,7 @@ export async function rateLimitMiddleware(
     userId: string,
     endpoint: keyof typeof RATE_LIMITS
 ): Promise<RateLimitResult> {
-    const tier = getUserTier(userId);
+    const tier = await getUserTier(userId);
     const config = RATE_LIMITS[endpoint][tier];
 
     return await checkRateLimit(userId, endpoint, config);

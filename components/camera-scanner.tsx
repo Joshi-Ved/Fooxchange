@@ -1,15 +1,29 @@
 'use client';
 
 /**
- * Camera Scanner Component
- * Real-time ingredient detection using device camera and Edge AI (TensorFlow.js)
+ * Camera Scanner Component - SECURE Edge AI Version
+ * Real-time ingredient detection using client-side TensorFlow.js
+ *
+ * Security Features:
+ * - Zero API calls (all processing client-side)
+ * - No data leaves device
+ * - Graceful degradation for unsupported devices
+ * - Proper error handling
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Camera, X, CheckCircle, Loader2, AlertCircle, Zap, Box } from 'lucide-react';
+import { Camera, X, CheckCircle, Loader2, AlertCircle, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { useEdgeVision, DetectedIngredient } from '@/lib/ai';
+import { useEdgeVision } from '@/lib/hooks/use-edge-vision';
+
+interface DetectedIngredient {
+    name: string;
+    quantity?: string;
+    unit?: string;
+    confidence: number;
+    databaseMatches?: any[];
+}
 
 interface CameraScannerProps {
     onIngredientsDetected: (ingredients: DetectedIngredient[]) => void;
@@ -17,32 +31,41 @@ interface CameraScannerProps {
 }
 
 export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerProps) {
+    const [isScanning, setIsScanning] = useState(false);
     const [hasPermission, setHasPermission] = useState(false);
-    const [isStreaming, setIsStreaming] = useState(false);
-
-    // Use the Edge Vision hook
-    const {
-        initialize,
-        startVideoAnalysis,
-        stopVideoAnalysis,
-        isInitialized,
-        isLoading: isModelLoading,
-        isSupported: isAISupported,
-        error: aiError,
-        result: analysisResult
-    } = useEdgeVision();
+    const [error, setError] = useState<string>('');
+    const [detectedItems, setDetectedItems] = useState<DetectedIngredient[]>([]);
+    const [processingTime, setProcessingTime] = useState<number>(0);
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
 
-    // Initialize AI on mount
+    // Edge AI Vision hook
+    const {
+        isLoading: modelLoading,
+        isSupported,
+        loadProgress,
+        error: modelError,
+        loadModel,
+        detect,
+    } = useEdgeVision({ minConfidence: 0.6 });
+
+    // Load model when camera starts
     useEffect(() => {
-        initialize();
-    }, [initialize]);
+        if (hasPermission && !modelLoading) {
+            loadModel();
+        }
+    }, [hasPermission, modelLoading, loadModel]);
 
     // Start camera
     const startCamera = useCallback(async () => {
+        // Check device support first
+        if (!isSupported) {
+            setError('Your device doesn\'t support AI scanning. This feature requires WebGL and WebAssembly.');
+            return;
+        }
+
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
@@ -56,32 +79,16 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                 videoRef.current.srcObject = stream;
                 streamRef.current = stream;
                 setHasPermission(true);
-
-                // Wait for video to load metadata provided by the browser
-                videoRef.current.onloadedmetadata = () => {
-                    setIsStreaming(true);
-                    if (videoRef.current) {
-                        videoRef.current.play();
-
-                        // Start AI analysis if initialized
-                        if (isInitialized) {
-                            startVideoAnalysis(videoRef.current, (result) => {
-                                // Draw bounding boxes on canvas
-                                drawBoundingBoxes(result.ingredients);
-                            }, { fps: 5, minConfidence: 0.60 });
-                        }
-                    }
-                };
+                setError('');
             }
         } catch (err) {
             console.error('Camera access error:', err);
+            setError('Failed to access camera. Please grant camera permissions.');
         }
-    }, [isInitialized, startVideoAnalysis]);
+    }, [isSupported]);
 
-    // Stop camera and AI
+    // Stop camera
     const stopCamera = useCallback(() => {
-        stopVideoAnalysis();
-
         if (streamRef.current) {
             streamRef.current.getTracks().forEach((track) => track.stop());
             streamRef.current = null;
@@ -90,72 +97,69 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             videoRef.current.srcObject = null;
         }
         setHasPermission(false);
-        setIsStreaming(false);
-    }, [stopVideoAnalysis]);
+    }, []);
 
-    // Draw bounding boxes
-    const drawBoundingBoxes = (ingredients: DetectedIngredient[]) => {
-        const video = videoRef.current;
-        const canvas = canvasRef.current;
-        const ctx = canvas?.getContext('2d');
+    // Capture and analyze image using Edge AI
+    const captureAndAnalyze = useCallback(async () => {
+        if (!videoRef.current || !canvasRef.current) return;
 
-        if (!video || !canvas || !ctx) return;
+        setIsScanning(true);
+        setError('');
 
-        // Match canvas size to video size
-        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        try {
+            // Capture frame from video
+            const video = videoRef.current;
+            const canvas = canvasRef.current;
+            const context = canvas.getContext('2d');
+
+            if (!context) throw new Error('Canvas context not available');
+
+            // Set canvas dimensions to match video
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
+
+            // Draw current video frame to canvas
+            context.drawImage(video, 0, 0);
+
+            // Run Edge AI detection directly on canvas (no API call!)
+            const result = await detect(canvas);
+
+            // Convert detected objects to ingredients format
+            const ingredients: DetectedIngredient[] = result.objects.map(obj => ({
+                name: obj.name,
+                confidence: obj.confidence,
+                quantity: undefined,
+                unit: undefined,
+            }));
+
+            setDetectedItems(ingredients);
+            setProcessingTime(result.processingTime);
+
+            // Auto-confirm high-confidence results
+            const highConfidenceItems = ingredients.filter(
+                (item) => item.confidence > 0.75
+            );
+
+            if (highConfidenceItems.length > 0) {
+                setTimeout(() => {
+                    onIngredientsDetected(ingredients);
+                }, 2000); // Show results for 2 seconds before closing
+            } else if (ingredients.length === 0) {
+                setError('No food items detected. Try getting closer or improving lighting.');
+            }
+        } catch (err) {
+            console.error('Scanning error:', err);
+            setError(err instanceof Error ? err.message : 'Failed to scan ingredients');
+        } finally {
+            setIsScanning(false);
         }
-
-        // Clear previous drawing
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Draw boxes
-        ingredients.forEach(item => {
-            const [x, y, width, height] = item.bbox;
-
-            // Draw box
-            ctx.strokeStyle = '#22c55e'; // Green-500
-            ctx.lineWidth = 4;
-            ctx.strokeRect(x, y, width, height);
-
-            // Draw label background
-            ctx.fillStyle = '#22c55e';
-            const text = `${item.name} ${Math.round(item.confidence * 100)}%`;
-            const textWidth = ctx.measureText(text).width;
-            ctx.fillRect(x, y - 25, textWidth + 10, 25);
-
-            // Draw label text
-            ctx.fillStyle = 'white';
-            ctx.font = '16px sans-serif';
-            ctx.fillText(text, x + 5, y - 7);
-        });
-    };
-
-    // Capture current detection
-    const handleCapture = useCallback(() => {
-        if (analysisResult && analysisResult.ingredients.length > 0) {
-            // Confirm detected ingredients
-            onIngredientsDetected(analysisResult.ingredients);
-        } else {
-            // No ingredients detected?
-            // Maybe take a snapshot and run a single high-accuracy inference?
-            // For now, just show a message or do nothing
-        }
-    }, [analysisResult, onIngredientsDetected]);
+    }, [detect, onIngredientsDetected]);
 
     // Cleanup on unmount
     const handleClose = useCallback(() => {
         stopCamera();
         onClose();
     }, [stopCamera, onClose]);
-
-    // Cleanup effect
-    useEffect(() => {
-        return () => {
-            stopCamera();
-        };
-    }, [stopCamera]);
 
     return (
         <div className="fixed inset-0 z-50 bg-black">
@@ -164,7 +168,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                 <div className="flex items-center justify-between">
                     <h2 className="text-xl font-bold text-white flex items-center gap-2">
                         <Camera className="w-6 h-6" />
-                        Scan Ingredients
+                        Scan Ingredients (Edge AI)
                     </h2>
                     <Button
                         variant="ghost"
@@ -178,24 +182,34 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             </div>
 
             {/* Camera View */}
-            <div className="relative w-full h-full flex items-center justify-center bg-black">
+            <div className="relative w-full h-full flex items-center justify-center">
                 {!hasPermission ? (
                     <Card className="max-w-md mx-4 p-6 text-center">
-                        <Camera className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-                        <h3 className="text-lg font-semibold mb-2">Camera Access Required</h3>
-                        <p className="text-sm text-muted-foreground mb-4">
-                            Point your camera at ingredients to automatically identify them using Edge AI.
-                        </p>
-
-                        {!isAISupported && (
-                            <div className="mb-4 p-3 bg-red-50 text-red-800 rounded-md text-sm">
-                                ⚠️ Your browser does not support on-device AI. Manual entry will be required.
-                            </div>
+                        {!isSupported ? (
+                            <>
+                                <AlertTriangle className="w-16 h-16 mx-auto mb-4 text-yellow-500" />
+                                <h3 className="text-lg font-semibold mb-2">Device Not Supported</h3>
+                                <p className="text-sm text-muted-foreground mb-4">
+                                    Your device doesn't support AI-powered scanning.
+                                    This feature requires WebGL and WebAssembly.
+                                </p>
+                                <Button onClick={handleClose} variant="outline" className="w-full">
+                                    Go Back
+                                </Button>
+                            </>
+                        ) : (
+                            <>
+                                <Camera className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+                                <h3 className="text-lg font-semibold mb-2">Camera Access Required</h3>
+                                <p className="text-sm text-muted-foreground mb-4">
+                                    Point your camera at ingredients to automatically identify them.
+                                    All processing happens on your device - no data is sent to servers.
+                                </p>
+                                <Button onClick={startCamera} className="w-full">
+                                    Enable Camera
+                                </Button>
+                            </>
                         )}
-
-                        <Button onClick={startCamera} className="w-full" disabled={!isAISupported}>
-                            Enable Camera
-                        </Button>
                     </Card>
                 ) : (
                     <>
@@ -203,64 +217,73 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                             ref={videoRef}
                             autoPlay
                             playsInline
-                            muted
-                            className="absolute inset-0 w-full h-full object-cover"
+                            className="w-full h-full object-cover"
                         />
-                        <canvas
-                            ref={canvasRef}
-                            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                        />
+                        <canvas ref={canvasRef} className="hidden" />
 
-                        {/* Loading Overlay */}
-                        {isModelLoading && (
-                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20">
+                        {/* Model loading overlay */}
+                        {modelLoading && (
+                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                                 <Card className="p-6 text-center">
                                     <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-primary" />
-                                    <p className="text-sm font-medium">Loading Vision Model...</p>
-                                    <p className="text-xs text-muted-foreground mt-1">This happens only once</p>
+                                    <p className="text-sm font-medium">Loading AI model...</p>
+                                    <p className="text-xs text-muted-foreground mt-2">{loadProgress}%</p>
                                 </Card>
                             </div>
                         )}
 
-                        {/* Debug Info / HUD */}
-                        <div className="absolute top-20 right-4 z-10 flex flex-col gap-2 items-end">
-                            <div className="bg-black/50 text-white text-xs px-2 py-1 rounded backdrop-blur-sm flex items-center gap-1">
-                                <Zap className="w-3 h-3 text-yellow-400" />
-                                <span>Edge AI Active</span>
+                        {/* Scanning overlay */}
+                        {isScanning && !modelLoading && (
+                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                <Card className="p-6 text-center">
+                                    <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-primary" />
+                                    <p className="text-sm font-medium">Analyzing ingredients...</p>
+                                </Card>
                             </div>
-                            {analysisResult && (
-                                <div className="bg-black/50 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">
-                                    {analysisResult.ingredients.length} items • {Math.round(analysisResult.processingTime)}ms
-                                </div>
-                            )}
-                        </div>
+                        )}
 
-                        {/* Real-time Results List (if items detected) */}
-                        {analysisResult && analysisResult.ingredients.length > 0 && (
-                            <div className="absolute bottom-24 left-4 right-4 max-h-40 overflow-y-auto space-y-2 pointer-events-none">
-                                {analysisResult.ingredients.slice(0, 3).map((item, idx) => (
-                                    <div key={idx} className="bg-white/90 backdrop-blur-md p-3 rounded-lg shadow-lg border border-green-200 flex items-center justify-between animate-in slide-in-from-bottom-5">
-                                        <div className="flex items-center gap-2">
-                                            <Box className="w-4 h-4 text-green-600" />
-                                            <span className="font-semibold text-gray-900 capitalize">{item.name}</span>
-                                        </div>
-                                        <span className="text-xs font-bold bg-green-100 text-green-800 px-2 py-1 rounded-full">
-                                            {Math.round(item.confidence * 100)}%
+                        {/* Results overlay */}
+                        {detectedItems.length > 0 && !isScanning && (
+                            <div className="absolute bottom-20 left-4 right-4">
+                                <Card className="p-4 max-h-64 overflow-y-auto">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <CheckCircle className="w-5 h-5 text-green-500" />
+                                        <p className="font-semibold">Detected Ingredients</p>
+                                        <span className="text-xs text-muted-foreground ml-auto">
+                                            {processingTime}ms (on-device)
                                         </span>
                                     </div>
-                                ))}
+                                    <div className="space-y-2">
+                                        {detectedItems.map((item, idx) => (
+                                            <div
+                                                key={idx}
+                                                className="flex items-center justify-between text-sm"
+                                            >
+                                                <span className="font-medium capitalize">{item.name}</span>
+                                                <span
+                                                    className={`text-xs px-2 py-0.5 rounded-full ${item.confidence > 0.75
+                                                        ? 'bg-green-100 text-green-700'
+                                                        : 'bg-yellow-100 text-yellow-700'
+                                                        }`}
+                                                >
+                                                    {Math.round(item.confidence * 100)}%
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </Card>
                             </div>
                         )}
                     </>
                 )}
 
                 {/* Error message */}
-                {aiError && (
-                    <div className="absolute bottom-24 left-4 right-4">
+                {(error || modelError) && (
+                    <div className="absolute bottom-20 left-4 right-4">
                         <Card className="p-4 border-red-200 bg-red-50">
                             <div className="flex items-center gap-2 text-red-700">
                                 <AlertCircle className="w-5 h-5" />
-                                <p className="text-sm font-medium">{aiError}</p>
+                                <p className="text-sm font-medium">{error || modelError}</p>
                             </div>
                         </Card>
                     </div>
@@ -268,22 +291,14 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             </div>
 
             {/* Controls */}
-            {hasPermission && (
-                <div className="absolute bottom-8 left-0 right-0 flex justify-center z-20">
+            {hasPermission && !isScanning && !modelLoading && (
+                <div className="absolute bottom-8 left-0 right-0 flex justify-center">
                     <Button
                         size="lg"
-                        onClick={handleCapture}
-                        disabled={!analysisResult || analysisResult.ingredients.length === 0}
-                        className={`rounded-full w-16 h-16 shadow-lg transition-all ${analysisResult && analysisResult.ingredients.length > 0
-                                ? 'bg-green-600 hover:bg-green-700 scale-110 ring-4 ring-green-400/50'
-                                : 'bg-white text-black hover:bg-gray-100'
-                            }`}
+                        onClick={captureAndAnalyze}
+                        className="rounded-full w-16 h-16 shadow-lg"
                     >
-                        {analysisResult && analysisResult.ingredients.length > 0 ? (
-                            <CheckCircle className="w-8 h-8" />
-                        ) : (
-                            <Camera className="w-8 h-8" />
-                        )}
+                        <Camera className="w-8 h-8" />
                     </Button>
                 </div>
             )}

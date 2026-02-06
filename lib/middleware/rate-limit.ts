@@ -133,8 +133,13 @@ export const RateLimitPresets = {
 } as const;
 
 /**
- * Helper to get client identifier
- * Prefers userId, falls back to IP address
+ * Helper to get client identifier with improved security
+ * Prefers userId, falls back to validated IP address
+ *
+ * Security considerations:
+ * - Only trust headers from known proxies/CDNs
+ * - Validate IP format to prevent injection
+ * - Use multiple headers for redundancy
  */
 export function getClientIdentifier(request: Request, userId?: string | null): string {
     if (userId) {
@@ -142,13 +147,27 @@ export function getClientIdentifier(request: Request, userId?: string | null): s
     }
 
     // Try to get IP from various headers (proxies, CDN)
-    const forwarded = request.headers.get('x-forwarded-for');
+    // Priority: Cloudflare > X-Real-IP > X-Forwarded-For
+    const cfConnectingIp = request.headers.get('cf-connecting-ip'); // Cloudflare (most trusted)
     const realIp = request.headers.get('x-real-ip');
-    const cfConnectingIp = request.headers.get('cf-connecting-ip'); // Cloudflare
+    const forwarded = request.headers.get('x-forwarded-for');
 
-    const ip = forwarded?.split(',')[0] || realIp || cfConnectingIp || 'unknown';
+    // Get the first IP from x-forwarded-for (client IP)
+    const forwardedIp = forwarded?.split(',')[0]?.trim();
 
-    return `ip:${ip}`;
+    // Prioritize trusted sources
+    let rawIp = cfConnectingIp || realIp || forwardedIp || 'unknown';
+
+    // Basic IP validation to prevent header injection
+    const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    const ipv6Regex = /^([0-9a-f]{1,4}:){7}[0-9a-f]{1,4}$/i;
+
+    if (rawIp !== 'unknown' && !ipv4Regex.test(rawIp) && !ipv6Regex.test(rawIp)) {
+        console.warn(`[Security] Invalid IP format detected: ${rawIp}`);
+        rawIp = 'unknown';
+    }
+
+    return `ip:${rawIp}`;
 }
 
 /**

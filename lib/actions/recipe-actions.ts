@@ -123,9 +123,9 @@ export async function createRecipe(data: RecipeFormData) {
 }
 
 /**
- * Server Action: Get user's own recipes
+ * Server Action: Get user's own recipes with pagination
  */
-export async function getUserRecipes() {
+export async function getUserRecipes(page: number = 1, limit: number = 20) {
     try {
         const { userId } = await auth();
 
@@ -133,10 +133,17 @@ export async function getUserRecipes() {
             return { error: "Unauthorized" };
         }
 
+        // Validate pagination parameters
+        const validPage = Math.max(1, Math.floor(page));
+        const validLimit = Math.min(100, Math.max(1, Math.floor(limit))); // Max 100 items per page
+        const skip = (validPage - 1) * validLimit;
+
         const dbUser = await db.user.findUnique({
             where: { clerkId: userId },
             include: {
                 recipes: {
+                    take: validLimit,
+                    skip: skip,
                     include: {
                         ingredients: {
                             include: {
@@ -160,7 +167,21 @@ export async function getUserRecipes() {
             return { error: "User not found" };
         }
 
-        return { success: true, recipes: dbUser.recipes };
+        // Get total count for pagination
+        const totalCount = await db.recipe.count({
+            where: { authorId: dbUser.id },
+        });
+
+        return {
+            success: true,
+            recipes: dbUser.recipes,
+            pagination: {
+                page: validPage,
+                limit: validLimit,
+                total: totalCount,
+                hasMore: skip + dbUser.recipes.length < totalCount,
+            },
+        };
     } catch (error) {
         console.error("Error fetching user recipes:", error);
         return { error: "Failed to fetch recipes" };
