@@ -5,11 +5,21 @@ const isPublicRoute = createRouteMatcher([
     '/',
     '/sign-in(.*)',
     '/sign-up(.*)',
-    '/recipes(.*)', // Allow browsing recipes without login
+    '/recipes$', // Only the main recipes page (browsing)
+    '/recipes/[^/]+$', // Individual recipe viewing (e.g., /recipes/abc123)
     '/api/uploadthing(.*)', // Public upload endpoint
 ])
 
 export default clerkMiddleware(async (auth, request) => {
+    const url = new URL(request.url);
+
+    // Protect recipe creation - require authentication
+    if (url.pathname === '/recipes/create') {
+        await auth.protect();
+        return;
+    }
+
+    // Protect all other non-public routes
     if (!isPublicRoute(request)) {
         await auth.protect()
     }
