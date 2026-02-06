@@ -29,17 +29,6 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "Fooxchange",
   },
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 5,
-    userScalable: true,
-    viewportFit: "cover",
-  },
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#16a34a" },
-    { media: "(prefers-color-scheme: dark)", color: "#15803d" },
-  ],
   openGraph: {
     title: "Fooxchange - Community Recipe Exchange",
     description: "Exchange recipes with home cooks and discover dishes based on your ingredients.",
@@ -54,6 +43,19 @@ export const metadata: Metadata = {
       { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
     ],
   },
+};
+
+// Separate viewport export (Next.js 16 requirement)
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#16a34a" },
+    { media: "(prefers-color-scheme: dark)", color: "#15803d" },
+  ],
 };
 
 export default function RootLayout({
