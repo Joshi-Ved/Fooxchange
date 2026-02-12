@@ -47,7 +47,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# generated prisma client (now uses default node_modules/.prisma/client)
+# generated prisma client (old custom path - keep ignored)
+/lib/generated/prisma
 
 # internal documentation (keep only README.md and ALL SETUP folder)
 PHASE*.md
