@@ -7,6 +7,7 @@ const isPublicRoute = createRouteMatcher([
     '/sign-up(.*)',
     '/recipes', // Main recipes browse page
     '/recipes/:id', // Individual recipe viewing (using path-to-regexp syntax)
+    '/api/health', // Health check for ALB/monitoring
     '/api/uploadthing(.*)', // Public upload endpoint
 ])
 

@@ -30,6 +30,7 @@ RUN npx prisma generate
 # Build Next.js (standalone output for minimal Docker image)
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+ENV STANDALONE=true
 RUN npm run build
 
 # Stage 3: Production runner (minimal image)

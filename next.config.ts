@@ -1,8 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Standalone output for Docker / AWS deployment
-  output: 'standalone',
+  // Use standalone output only for Docker/ECS deployments (set STANDALONE=true)
+  // AWS Amplify has its own SSR adapter - do NOT enable standalone there
+  ...(process.env.STANDALONE === 'true' ? { output: 'standalone' as const } : {}),
 
   // Security: Limit request body size to prevent DoS attacks
   experimental: {
