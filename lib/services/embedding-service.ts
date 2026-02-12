@@ -1,10 +1,11 @@
 /**
- * Embedding Service (DEPRECATED - Use Edge Search instead per PLAN3.md)
+ * Embedding Service - Hybrid approach
  *
- * Legacy cloud-based embeddings using OpenAI's text-embedding-3-small.
- * Migrating to client-side Transformers.js for zero-cost, privacy-first approach.
+ * Uses OpenAI's text-embedding-3-small when available,
+ * falls back to simple hash-based embeddings for basic functionality.
  *
- * @deprecated Use Transformers.js (Xenova/all-MiniLM-L6-v2) for new integrations
+ * For production edge search, use Transformers.js (Edge Search) in the browser.
+ * @see lib/hooks/use-edge-search.ts for client-side embeddings
  */
 
 // Optional OpenAI import (for backward compatibility during migration)
@@ -17,38 +18,67 @@ try {
         });
     }
 } catch (error) {
-    console.warn('[Embedding Service] OpenAI not available. Use Transformers.js (Edge Search) instead.');
+    console.warn('[Embedding Service] OpenAI not available. Using simple hash embeddings as fallback.');
+}
+
+/**
+ * Simple deterministic hash-based embedding fallback
+ * Produces a 384-dimensional vector from text using character-level hashing.
+ * NOT semantically meaningful, but allows the system to function without API keys.
+ */
+function simpleHashEmbedding(text: string, dimensions: number = 384): number[] {
+    const embedding = new Array(dimensions).fill(0);
+    const normalized = text.toLowerCase().trim();
+
+    for (let i = 0; i < normalized.length; i++) {
+        const charCode = normalized.charCodeAt(i);
+        const position = i % dimensions;
+        // Use a simple hash function to distribute values
+        embedding[position] += Math.sin(charCode * (i + 1) * 0.1) * 0.1;
+        embedding[(position + 1) % dimensions] += Math.cos(charCode * (i + 1) * 0.1) * 0.1;
+    }
+
+    // L2 normalize
+    const norm = Math.sqrt(embedding.reduce((sum: number, val: number) => sum + val * val, 0));
+    if (norm > 0) {
+        for (let i = 0; i < dimensions; i++) {
+            embedding[i] /= norm;
+        }
+    }
+
+    return embedding;
 }
 
 /**
  * Generate embedding vector for text
- * 
- * @param text - The text to embed (ingredient name, recipe description, etc.)
- * @returns Array of 1536 floats representing the semantic meaning
+ * Uses OpenAI when available, falls back to simple hash embedding
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
-    try {
-        if (!text || text.trim().length === 0) {
-            throw new Error('Text cannot be empty for embedding generation');
-        }
-
-        const response = await openai.embeddings.create({
-            model: 'text-embedding-3-small',
-            input: text.trim(),
-            encoding_format: 'float',
-        });
-
-        if (!response.data || response.data.length === 0) {
-            throw new Error('No embedding returned from OpenAI');
-        }
-
-        return response.data[0].embedding;
-    } catch (error) {
-        console.error('Error generating embedding:', error);
-        throw new Error(
-            `Failed to generate embedding: ${error instanceof Error ? error.message : 'Unknown error'}`
-        );
+    if (!text || text.trim().length === 0) {
+        throw new Error('Text cannot be empty for embedding generation');
     }
+
+    // Use OpenAI if available
+    if (openai) {
+        try {
+            const response = await openai.embeddings.create({
+                model: 'text-embedding-3-small',
+                input: text.trim(),
+                encoding_format: 'float',
+            });
+
+            if (!response.data || response.data.length === 0) {
+                throw new Error('No embedding returned from OpenAI');
+            }
+
+            return response.data[0].embedding;
+        } catch (error) {
+            console.error('OpenAI embedding failed, using fallback:', error);
+        }
+    }
+
+    // Fallback: simple hash-based embedding
+    return simpleHashEmbedding(text);
 }
 
 /**

@@ -1,0 +1,59 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Build output
+.next
+out
+
+# Testing
+coverage
+**/__tests__
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+jest.config.ts
+jest.setup.ts
+
+# IDE / Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment files (injected at runtime)
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# Docs
+ALL SETUP/
+README.md
+*.md
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Temp files
+tmpclaude-*
+nul
+
+# TypeScript build info
+tsconfig.tsbuildinfo
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Misc
+seed.js
+scripts/
+eslint.config.mjs
+prettier.config.*

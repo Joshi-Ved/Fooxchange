@@ -11,11 +11,8 @@ import {
 import { db } from '@/lib/db';
 import * as embeddingService from '@/lib/services/embedding-service';
 
-// Mock the embedding service
+// Embedding service mock
 jest.mock('@/lib/services/embedding-service');
-
-// Mock Google Generative AI
-jest.mock('@google/generative-ai');
 
 describe('ML Service', () => {
     describe('predictCookingDifficulty', () => {

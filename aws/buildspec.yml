@@ -1,0 +1,43 @@
+# AWS CodeBuild / CodePipeline buildspec
+# Builds Docker image, pushes to ECR, updates ECS service
+
+version: 0.2
+
+env:
+  variables:
+    AWS_REGION: "ap-southeast-1"
+    ECR_REPO: "fooxchange"
+    ECS_CLUSTER: "fooxchange-cluster"
+    ECS_SERVICE: "fooxchange-service"
+    CONTAINER_NAME: "fooxchange"
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_URI}
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:-latest}
+
+  build:
+    commands:
+      - echo Building Docker image...
+      - docker build -t ${ECR_REPO}:${IMAGE_TAG} .
+      - docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_URI}:${IMAGE_TAG}
+      - docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_URI}:latest
+
+  post_build:
+    commands:
+      - echo Pushing Docker image to ECR...
+      - docker push ${ECR_URI}:${IMAGE_TAG}
+      - docker push ${ECR_URI}:latest
+      - echo Writing image definitions file...
+      - printf '[{"name":"%s","imageUri":"%s"}]' $CONTAINER_NAME $ECR_URI:$IMAGE_TAG > imagedefinitions.json
+      - echo Updating ECS service...
+      - aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE --force-new-deployment --region $AWS_REGION
+
+artifacts:
+  files:
+    - imagedefinitions.json

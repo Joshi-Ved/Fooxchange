@@ -123,6 +123,171 @@ export async function createRecipe(data: RecipeFormData) {
 }
 
 /**
+ * Server Action: Update an existing recipe
+ */
+export async function updateRecipe(recipeId: string, data: RecipeFormData) {
+    try {
+        const { userId } = await auth();
+
+        if (!userId) {
+            return { error: "You must be logged in to edit a recipe" };
+        }
+
+        const validatedData = recipeFormSchema.parse(data);
+
+        const dbUser = await db.user.findUnique({
+            where: { clerkId: userId },
+        });
+
+        if (!dbUser) {
+            return { error: "User not found" };
+        }
+
+        // Verify ownership
+        const existingRecipe = await db.recipe.findUnique({
+            where: { id: recipeId },
+        });
+
+        if (!existingRecipe) {
+            return { error: "Recipe not found" };
+        }
+
+        if (existingRecipe.authorId !== dbUser.id) {
+            return { error: "You can only edit your own recipes" };
+        }
+
+        // Update in a transaction
+        const recipe = await db.$transaction(async (tx) => {
+            // Update recipe basic fields
+            const updatedRecipe = await tx.recipe.update({
+                where: { id: recipeId },
+                data: {
+                    title: validatedData.title,
+                    description: validatedData.description,
+                    imageUrl: validatedData.imageUrl || null,
+                    prepTime: validatedData.prepTime || null,
+                    cookTime: validatedData.cookTime || null,
+                    servings: validatedData.servings,
+                    difficulty: validatedData.difficulty,
+                },
+            });
+
+            // Delete existing ingredients and steps, then recreate
+            await tx.recipeIngredient.deleteMany({ where: { recipeId } });
+            await tx.step.deleteMany({ where: { recipeId } });
+
+            // Re-create ingredients
+            for (const ing of validatedData.ingredients) {
+                const slug = ing.name.toLowerCase().replace(/\s+/g, "-").replace(/[^\w-]/g, "");
+
+                let ingredient = await tx.ingredient.findUnique({
+                    where: { slug },
+                });
+
+                if (!ingredient) {
+                    ingredient = await tx.ingredient.create({
+                        data: {
+                            name: ing.name,
+                            slug,
+                        },
+                    });
+                }
+
+                await tx.recipeIngredient.create({
+                    data: {
+                        recipeId,
+                        ingredientId: ingredient.id,
+                        amount: ing.amount,
+                        isOptional: ing.isOptional,
+                    },
+                });
+            }
+
+            // Re-create steps
+            for (let i = 0; i < validatedData.steps.length; i++) {
+                await tx.step.create({
+                    data: {
+                        recipeId,
+                        order: i + 1,
+                        content: validatedData.steps[i].content,
+                        imageUrl: validatedData.steps[i].imageUrl || null,
+                    },
+                });
+            }
+
+            return updatedRecipe;
+        });
+
+        revalidatePath("/");
+        revalidatePath("/recipes");
+        revalidatePath(`/recipes/${recipeId}`);
+
+        return { success: true, recipeId: recipe.id };
+    } catch (error) {
+        console.error("Error updating recipe:", error);
+
+        if (error instanceof Error) {
+            return { error: error.message };
+        }
+
+        return { error: "Failed to update recipe. Please try again." };
+    }
+}
+
+/**
+ * Server Action: Get recipe data for editing (only if owned by current user)
+ */
+export async function getRecipeForEdit(recipeId: string) {
+    try {
+        const { userId } = await auth();
+
+        if (!userId) {
+            return { error: "Unauthorized" };
+        }
+
+        const dbUser = await db.user.findUnique({
+            where: { clerkId: userId },
+        });
+
+        if (!dbUser) {
+            return { error: "User not found" };
+        }
+
+        const recipe = await db.recipe.findUnique({
+            where: { id: recipeId },
+            include: {
+                ingredients: {
+                    include: {
+                        ingredient: true,
+                    },
+                    orderBy: {
+                        createdAt: "asc",
+                    },
+                },
+                steps: {
+                    orderBy: {
+                        order: "asc",
+                    },
+                },
+            },
+        });
+
+        if (!recipe) {
+            return { error: "Recipe not found" };
+        }
+
+        if (recipe.authorId !== dbUser.id) {
+            return { error: "You can only edit your own recipes" };
+        }
+
+        return { success: true, recipe };
+    } catch (error) {
+        console.error("Error fetching recipe for edit:", error);
+        return { error: "Failed to load recipe" };
+    }
+}
+
+/**
  * Server Action: Get user's own recipes with pagination
  */
 export async function getUserRecipes(page: number = 1, limit: number = 20) {

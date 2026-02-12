@@ -1,11 +1,36 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Standalone output for Docker / AWS deployment
+  output: 'standalone',
+
   // Security: Limit request body size to prevent DoS attacks
   experimental: {
     serverActions: {
       bodySizeLimit: '50kb', // Strict limit for recipe metadata
     },
+  },
+
+  // Allow external images from UploadThing and Clerk
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'utfs.io',
+      },
+      {
+        protocol: 'https',
+        hostname: '*.ufs.sh',
+      },
+      {
+        protocol: 'https',
+        hostname: 'img.clerk.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'images.clerk.dev',
+      },
+    ],
   },
 
   // Security headers

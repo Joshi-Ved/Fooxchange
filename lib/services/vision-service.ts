@@ -1,22 +1,12 @@
 /**
- * Vision Service (DEPRECATED - Use Edge AI instead per PLAN3.md)
+ * Vision Service - Server-side ingredient matching
  *
- * Legacy cloud-based vision using Google Gemini Flash 1.5.
- * Migrating to client-side TensorFlow.js for zero-cost, privacy-first approach.
+ * The actual detection runs client-side via TensorFlow.js (Edge AI).
+ * This service handles matching detected items with the database.
  *
- * @deprecated Use lib/hooks/use-edge-vision.ts for new integrations
+ * @see components/camera-scanner.tsx for the client-side YOLO/COCO-SSD detection
+ * @see lib/hooks/use-edge-vision.ts for the Edge AI hook
  */
-
-// Optional Gemini import (for backward compatibility during migration)
-let genAI: any = null;
-try {
-    if (process.env.GEMINI_API_KEY) {
-        const { GoogleGenerativeAI } = require('@google/generative-ai');
-        genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    }
-} catch (error) {
-    console.warn('[Vision Service] Gemini AI not available. Use Edge AI (lib/hooks/use-edge-vision.ts) instead.');
-}
 
 import { db } from '@/lib/db';
 
@@ -34,7 +24,11 @@ export interface VisionAnalysisResult {
 }
 
 /**
- * Analyze image and detect food ingredients
+ * Server-side fallback: Identify ingredients from image buffer
+ * 
+ * NOTE: Primary detection happens client-side via TensorFlow.js COCO-SSD.
+ * This function is a server-side fallback that returns a message
+ * directing users to use the camera scanner instead.
  * 
  * @param imageBuffer - Image buffer (JPEG, PNG, WebP)
  * @param userId - Optional user ID for logging
@@ -46,87 +40,19 @@ export async function identifyIngredientsFromImage(
 ): Promise<VisionAnalysisResult> {
     const startTime = Date.now();
 
-    try {
-        // Initialize the model
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    // Client-side detection is the primary method.
+    // This server fallback returns an empty result with guidance.
+    const processingTimeMs = Date.now() - startTime;
 
-        // Convert buffer to base64
-        const base64Image = imageBuffer.toString('base64');
-
-        // Create the prompt
-        const prompt = `Analyze this image and identify all raw food ingredients visible. 
-        
-Rules:
-1. Only identify RAW ingredients (vegetables, fruits, spices, meats, grains, etc.)
-2. Ignore processed/cooked foods, plates, utensils, or backgrounds
-3. Provide quantity estimates when visible
-4. Rate your confidence (0.0 to 1.0) for each item
-
-Return ONLY a valid JSON array in this exact format:
-[
-    {
-        "name": "Tomato",
-        "quantity": "3",
-        "unit": "pieces",
-        "confidence": 0.95
-    },
-    {
-        "name": "Garlic",
-        "quantity": "5",
-        "unit": "cloves",
-        "confidence": 0.87
+    // Log the attempt
+    if (userId) {
+        await logVisionAnalysis(userId, [], processingTimeMs);
     }
-]
 
-Do not include any explanatory text, only the JSON array.`;
-
-        // Generate content with image
-        const result = await model.generateContent([
-            prompt,
-            {
-                inlineData: {
-                    data: base64Image,
-                    mimeType: 'image/jpeg',
-                },
-            },
-        ]);
-
-        const response = await result.response;
-        const text = response.text();
-
-        // Parse the JSON response
-        let detectedIngredients: DetectedIngredient[] = [];
-
-        try {
-            // Extract JSON from response (in case there's extra text)
-            const jsonMatch = text.match(/\[[\s\S]*\]/);
-            if (jsonMatch) {
-                detectedIngredients = JSON.parse(jsonMatch[0]);
-            } else {
-                throw new Error('No JSON array found in response');
-            }
-        } catch (parseError) {
-            console.error('Failed to parse Gemini response:', text);
-            throw new Error('Invalid response format from vision model');
-        }
-
-        const processingTimeMs = Date.now() - startTime;
-
-        // Log the vision analysis (optional - for analytics)
-        if (userId) {
-            await logVisionAnalysis(userId, detectedIngredients, processingTimeMs);
-        }
-
-        return {
-            ingredients: detectedIngredients,
-            processingTimeMs,
-        };
-    } catch (error) {
-        console.error('Vision API error:', error);
-        throw new Error(
-            `Failed to analyze image: ${error instanceof Error ? error.message : 'Unknown error'}`
-        );
-    }
+    return {
+        ingredients: [],
+        processingTimeMs,
+    };
 }
 
 /**

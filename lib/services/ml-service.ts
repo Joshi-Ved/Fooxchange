@@ -1,26 +1,14 @@
 /**
- * ML Service - Advanced Machine Learning Features
+ * ML Service - Machine Learning Features
  *
  * Provides intelligent recipe recommendations, nutritional analysis,
  * cooking time predictions, and personalized suggestions.
  *
- * Note: Cloud AI (Gemini) is deprecated per PLAN3.md - migrating to Edge AI
+ * All features work locally without external API keys.
  */
 
 import { db } from '@/lib/db';
 import { generateEmbedding, cosineSimilarity } from './embedding-service';
-
-// Optional: Gemini AI (deprecated, use Edge AI instead per PLAN3.md)
-// Kept for backward compatibility during migration
-let genAI: any = null;
-try {
-    if (process.env.GEMINI_API_KEY) {
-        const { GoogleGenerativeAI } = require('@google/generative-ai');
-        genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    }
-} catch (error) {
-    console.warn('[ML Service] Gemini AI not available. Using fallback methods.');
-}
 
 export interface UserPreferences {
     dietaryRestrictions?: string[];
@@ -322,7 +310,8 @@ export function predictCookingDifficulty(recipe: any): {
 }
 
 /**
- * Estimate nutritional information using AI
+ * Estimate nutritional information using heuristic rules
+ * Falls back to heuristic estimation when no AI API is available
  */
 export async function estimateNutrition(recipe: any): Promise<{
     calories: number;
@@ -331,88 +320,127 @@ export async function estimateNutrition(recipe: any): Promise<{
     fat: number;
     confidence: number;
 }> {
-    try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    // Heuristic-based estimation (works without API keys)
+    const ingredientCount = recipe.ingredients?.length || 0;
+    const servings = recipe.servings || 4;
 
-        const ingredients = recipe.ingredients
-            ?.map((ri: any) => `${ri.quantity} ${ri.unit || ''} ${ri.ingredient.name}`)
-            .join('\n') || '';
+    // Common nutritional patterns per ingredient type
+    const nutritionEstimates: Record<string, { cal: number; protein: number; carbs: number; fat: number }> = {
+        chicken: { cal: 165, protein: 31, carbs: 0, fat: 3.6 },
+        beef: { cal: 250, protein: 26, carbs: 0, fat: 15 },
+        rice: { cal: 130, protein: 2.7, carbs: 28, fat: 0.3 },
+        pasta: { cal: 131, protein: 5, carbs: 25, fat: 1.1 },
+        potato: { cal: 77, protein: 2, carbs: 17, fat: 0.1 },
+        tomato: { cal: 18, protein: 0.9, carbs: 3.9, fat: 0.2 },
+        onion: { cal: 40, protein: 1.1, carbs: 9.3, fat: 0.1 },
+        garlic: { cal: 5, protein: 0.2, carbs: 1, fat: 0 },
+        oil: { cal: 120, protein: 0, carbs: 0, fat: 14 },
+        butter: { cal: 102, protein: 0.1, carbs: 0, fat: 11.5 },
+        egg: { cal: 72, protein: 6.3, carbs: 0.4, fat: 4.8 },
+        milk: { cal: 42, protein: 3.4, carbs: 5, fat: 1 },
+        cheese: { cal: 113, protein: 7, carbs: 0.4, fat: 9 },
+        bread: { cal: 75, protein: 2.7, carbs: 14, fat: 1 },
+        sugar: { cal: 49, protein: 0, carbs: 13, fat: 0 },
+        flour: { cal: 57, protein: 1.6, carbs: 12, fat: 0.2 },
+        spinach: { cal: 7, protein: 0.9, carbs: 1.1, fat: 0.1 },
+        paneer: { cal: 265, protein: 18, carbs: 3.6, fat: 20 },
+    };
 
-        const servings = recipe.servings || 4;
+    let totalCal = 0, totalProtein = 0, totalCarbs = 0, totalFat = 0;
+    let matchedCount = 0;
 
-        const prompt = `Estimate the nutritional information per serving for this recipe:
-
-Recipe: ${recipe.title}
-Servings: ${servings}
-
-Ingredients:
-${ingredients}
-
-Return ONLY a JSON object with this exact format:
-{
-    "calories": 450,
-    "protein": 25,
-    "carbs": 40,
-    "fat": 15,
-    "confidence": 0.75
-}
-
-All values should be numbers (grams for protein/carbs/fat). Confidence should be 0.0 to 1.0.`;
-
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const text = response.text();
-
-        // Parse JSON response
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            const nutrition = JSON.parse(jsonMatch[0]);
-            return nutrition;
+    const ingredients = recipe.ingredients || [];
+    ingredients.forEach((ri: any) => {
+        const name = (ri.ingredient?.name || ri.name || '').toLowerCase();
+        for (const [key, vals] of Object.entries(nutritionEstimates)) {
+            if (name.includes(key)) {
+                totalCal += vals.cal;
+                totalProtein += vals.protein;
+                totalCarbs += vals.carbs;
+                totalFat += vals.fat;
+                matchedCount++;
+                break;
+            }
         }
+    });
 
-        throw new Error('Invalid nutrition response');
-    } catch (error) {
-        console.error('Nutrition estimation error:', error);
-        // Return default values
-        return {
-            calories: 0,
-            protein: 0,
-            carbs: 0,
-            fat: 0,
-            confidence: 0,
-        };
+    // If no matches, estimate based on ingredient count
+    if (matchedCount === 0) {
+        totalCal = ingredientCount * 80;
+        totalProtein = ingredientCount * 3;
+        totalCarbs = ingredientCount * 10;
+        totalFat = ingredientCount * 3;
     }
+
+    // Per serving
+    const perServing = servings > 0 ? servings : 1;
+    const confidence = matchedCount > 0 ? Math.min(0.7, matchedCount / ingredientCount) : 0.2;
+
+    return {
+        calories: Math.round(totalCal / perServing),
+        protein: Math.round(totalProtein / perServing),
+        carbs: Math.round(totalCarbs / perServing),
+        fat: Math.round(totalFat / perServing),
+        confidence: Math.round(confidence * 100) / 100,
+    };
 }
 
 /**
- * Generate cooking tips using AI
+ * Generate cooking tips using heuristic rules
+ * Works without any API keys
  */
-export async function generateCookingTips(recipe: any): Promise<string[]> {
-    try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+export function generateCookingTips(recipe: any): string[] {
+    const tips: string[] = [];
+    const ingredients = recipe.ingredients || [];
+    const ingredientNames = ingredients.map((ri: any) =>
+        (ri.ingredient?.name || ri.name || '').toLowerCase()
+    );
+    const totalTime = (recipe.prepTime || 0) + (recipe.cookTime || 0);
 
-        const prompt = `Generate 3-5 practical cooking tips for this recipe:
+    // Prep all ingredients before starting
+    tips.push('Read through all steps before starting and prep your ingredients (mise en place).');
 
-Recipe: ${recipe.title}
-Description: ${recipe.description}
-
-Return ONLY a JSON array of strings:
-["Tip 1", "Tip 2", "Tip 3"]
-
-Make tips actionable, concise, and helpful for home cooks.`;
-
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const text = response.text();
-
-        const jsonMatch = text.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-            return JSON.parse(jsonMatch[0]);
-        }
-
-        return [];
-    } catch (error) {
-        console.error('Tip generation error:', error);
-        return [];
+    // Time-based tips
+    if (totalTime > 60) {
+        tips.push('This recipe takes a while - plan ahead and consider prepping ingredients in advance.');
     }
+    if (totalTime <= 30) {
+        tips.push('This is a quick recipe! Have all ingredients measured and ready before you start cooking.');
+    }
+
+    // Ingredient-based tips
+    if (ingredientNames.some((n: string) => n.includes('garlic'))) {
+        tips.push('Don\'t burn the garlic - add it after other aromatics and cook just until fragrant.');
+    }
+    if (ingredientNames.some((n: string) => n.includes('onion'))) {
+        tips.push('Cook onions on medium heat until translucent for the best flavor base.');
+    }
+    if (ingredientNames.some((n: string) => n.includes('chicken') || n.includes('meat') || n.includes('beef'))) {
+        tips.push('Let meat come to room temperature before cooking for more even results.');
+        tips.push('Use a meat thermometer to ensure safe internal temperature.');
+    }
+    if (ingredientNames.some((n: string) => n.includes('pasta') || n.includes('noodle'))) {
+        tips.push('Salt your pasta water generously - it should taste like the sea.');
+        tips.push('Save some pasta water before draining to adjust sauce consistency.');
+    }
+    if (ingredientNames.some((n: string) => n.includes('rice'))) {
+        tips.push('Rinse rice under cold water until water runs clear for fluffier results.');
+    }
+    if (ingredientNames.some((n: string) => n.includes('paneer'))) {
+        tips.push('Soak paneer in warm water for 10 minutes before cooking for a softer texture.');
+    }
+    if (ingredientNames.some((n: string) => n.includes('egg'))) {
+        tips.push('Use room temperature eggs for more consistent cooking results.');
+    }
+
+    // Difficulty-based tips
+    if (recipe.difficulty === 'HARD') {
+        tips.push('Take your time with each step - precision matters for this recipe.');
+    }
+
+    // General tip
+    tips.push('Taste as you go and adjust seasoning - your palate is the best guide.');
+
+    // Return 3-5 tips max
+    return tips.slice(0, 5);
 }

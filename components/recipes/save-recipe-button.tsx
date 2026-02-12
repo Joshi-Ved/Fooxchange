@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Heart } from "lucide-react";
-import { toggleSaveRecipe } from "@/lib/actions/detail-actions";
+import { toggleSaveRecipe } from "@/lib/actions/recipe-actions";
 import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 
@@ -32,9 +32,15 @@ export function SaveRecipeButton({
 
         startTransition(async () => {
             try {
-                const result = await toggleSaveRecipe(userId, recipeId);
-                setIsSaved(result.saved);
-                setCount((prev) => (result.saved ? prev + 1 : prev - 1));
+                const result = await toggleSaveRecipe(recipeId);
+                if (result.error) {
+                    console.error("Save error:", result.error);
+                    return;
+                }
+                if (result.saved !== undefined) {
+                    setIsSaved(result.saved);
+                    setCount((prev) => (result.saved ? prev + 1 : prev - 1));
+                }
             } catch (error) {
                 console.error("Failed to save recipe:", error);
             }

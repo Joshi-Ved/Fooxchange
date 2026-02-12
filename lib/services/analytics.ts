@@ -5,6 +5,8 @@
  * Integrates with monitoring services (Vercel Analytics, Sentry, etc.)
  */
 
+import { db } from '@/lib/db';
+
 export interface AIMetric {
     endpoint: string;
     userId: string;
@@ -201,26 +203,31 @@ export async function healthCheck(): Promise<{
     status: 'healthy' | 'degraded' | 'down';
     services: {
         database: boolean;
-        gemini: boolean;
-        openai: boolean;
+        auth: boolean;
+        uploads: boolean;
+        edgeAI: boolean;
     };
 }> {
     try {
         // Check database connection
         const dbHealthy = await checkDatabaseHealth();
 
-        // Check AI services
-        const geminiHealthy = !!process.env.GEMINI_API_KEY;
-        const openaiHealthy = !!process.env.OPENAI_API_KEY;
+        // Check critical services configuration
+        const authConfigured = !!process.env.CLERK_SECRET_KEY;
+        const uploadsConfigured = !!process.env.UPLOADTHING_SECRET;
+        // Edge AI (TensorFlow.js) runs client-side, always available
+        const edgeAIAvailable = true;
 
-        const allHealthy = dbHealthy && geminiHealthy && openaiHealthy;
+        // App is healthy if DB + auth work; degraded if non-critical services missing
+        const coreHealthy = dbHealthy && authConfigured;
 
         return {
-            status: allHealthy ? 'healthy' : 'degraded',
+            status: coreHealthy ? 'healthy' : dbHealthy ? 'degraded' : 'down',
             services: {
                 database: dbHealthy,
-                gemini: geminiHealthy,
-                openai: openaiHealthy,
+                auth: authConfigured,
+                uploads: uploadsConfigured,
+                edgeAI: edgeAIAvailable,
             },
         };
     } catch (error) {
@@ -228,8 +235,9 @@ export async function healthCheck(): Promise<{
             status: 'down',
             services: {
                 database: false,
-                gemini: false,
-                openai: false,
+                auth: false,
+                uploads: false,
+                edgeAI: true,
             },
         };
     }
@@ -237,10 +245,10 @@ export async function healthCheck(): Promise<{
 
 async function checkDatabaseHealth(): Promise<boolean> {
     try {
-        // Simple database query to check connection
-        // const result = await db.$queryRaw`SELECT 1`;
+        await db.$queryRaw`SELECT 1`;
         return true;
     } catch (error) {
+        console.error('[Health] Database check failed:', error);
         return false;
     }
 }

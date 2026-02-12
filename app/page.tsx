@@ -10,6 +10,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+// Force dynamic rendering - page queries DB for trending recipes
+export const dynamic = 'force-dynamic';
+
 const howItWorks = [
   {
     icon: Search,

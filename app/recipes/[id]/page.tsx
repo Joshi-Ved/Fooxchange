@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getRecipeById, isRecipeSaved } from "@/lib/actions/detail-actions";
 import { CookMode } from "@/components/recipes/cook-mode";
 import { SaveRecipeButton } from "@/components/recipes/save-recipe-button";
+import { RecipeActions } from "@/components/recipes/recipe-actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -14,6 +15,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
+import { db } from "@/lib/db";
 import type { Metadata } from "next";
 
 interface RecipeDetailPageProps {
@@ -58,6 +60,18 @@ export default async function RecipeDetailPage({
 
     // Check if current user has saved this recipe
     const isSaved = userId ? await isRecipeSaved(userId, id) : false;
+
+    // Check if current user is the author (for edit/delete)
+    let isAuthor = false;
+    if (userId) {
+        const dbUser = await db.user.findUnique({
+            where: { clerkId: userId },
+            select: { id: true },
+        });
+        if (dbUser) {
+            isAuthor = recipe.author && recipe.authorId === dbUser.id;
+        }
+    }
 
     const totalTime = (recipe.prepTime || 0) + (recipe.cookTime || 0);
     const difficultyColors = {
@@ -146,6 +160,9 @@ export default async function RecipeDetailPage({
                                     <Share2 className="h-5 w-5" />
                                     Share
                                 </Button>
+                                {isAuthor && (
+                                    <RecipeActions recipeId={recipe.id} />
+                                )}
                             </div>
                         </div>
 

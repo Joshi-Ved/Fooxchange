@@ -78,12 +78,25 @@ export async function toggleSaveRecipe(userId: string, recipeId: string) {
     }
 }
 
-export async function isRecipeSaved(userId: string, recipeId: string) {
+/**
+ * Check if a recipe is saved by a user.
+ * @param clerkUserId - The Clerk user ID (from auth())
+ * @param recipeId - The recipe ID
+ */
+export async function isRecipeSaved(clerkUserId: string, recipeId: string) {
     try {
+        // Resolve Clerk userId to DB userId
+        const dbUser = await db.user.findUnique({
+            where: { clerkId: clerkUserId },
+            select: { id: true },
+        });
+
+        if (!dbUser) return false;
+
         const saved = await db.savedRecipe.findUnique({
             where: {
                 userId_recipeId: {
-                    userId,
+                    userId: dbUser.id,
                     recipeId,
                 },
             },

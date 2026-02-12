@@ -5,55 +5,15 @@
 import { identifyIngredientsFromImage, matchIngredientsToDatabase } from '@/lib/services/vision-service';
 import { db } from '@/lib/db';
 
-// Mock Google Generative AI
-jest.mock('@google/generative-ai', () => ({
-    GoogleGenerativeAI: jest.fn().mockImplementation(() => ({
-        getGenerativeModel: jest.fn().mockReturnValue({
-            generateContent: jest.fn().mockResolvedValue({
-                response: {
-                    text: () => JSON.stringify([
-                        {
-                            name: 'Tomato',
-                            quantity: '3',
-                            unit: 'pieces',
-                            confidence: 0.95,
-                        },
-                        {
-                            name: 'Onion',
-                            quantity: '2',
-                            unit: 'pieces',
-                            confidence: 0.88,
-                        },
-                    ]),
-                },
-            }),
-        }),
-    })),
-}));
-
 describe('Vision Service', () => {
     describe('identifyIngredientsFromImage', () => {
-        it('should detect ingredients from image buffer', async () => {
+        it('should return empty ingredients (client-side detection is primary)', async () => {
             const mockBuffer = Buffer.from('fake-image-data');
 
             const result = await identifyIngredientsFromImage(mockBuffer);
 
-            expect(result.ingredients).toHaveLength(2);
-            expect(result.ingredients[0]).toEqual({
-                name: 'Tomato',
-                quantity: '3',
-                unit: 'pieces',
-                confidence: 0.95,
-            });
-            expect(result.processingTimeMs).toBeGreaterThan(0);
-        });
-
-        it('should handle errors gracefully', async () => {
-            const invalidBuffer = Buffer.from('');
-
-            await expect(
-                identifyIngredientsFromImage(invalidBuffer)
-            ).rejects.toThrow();
+            expect(result.ingredients).toHaveLength(0);
+            expect(result.processingTimeMs).toBeGreaterThanOrEqual(0);
         });
 
         it('should log vision analysis when userId is provided', async () => {

@@ -5,8 +5,8 @@ const isPublicRoute = createRouteMatcher([
     '/',
     '/sign-in(.*)',
     '/sign-up(.*)',
-    '/recipes$', // Only the main recipes page (browsing)
-    '/recipes/[^/]+$', // Individual recipe viewing (e.g., /recipes/abc123)
+    '/recipes', // Main recipes browse page
+    '/recipes/:id', // Individual recipe viewing (using path-to-regexp syntax)
     '/api/uploadthing(.*)', // Public upload endpoint
 ])
 
