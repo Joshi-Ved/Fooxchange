@@ -8,7 +8,7 @@
  * In production: Creates single instance
  */
 
-import { PrismaClient } from './generated/prisma';
+import { PrismaClient } from '@prisma/client';
 
 // Extend global type for development singleton
 const globalForPrisma = globalThis as unknown as {

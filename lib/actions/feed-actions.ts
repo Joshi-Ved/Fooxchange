@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { Recipe, Difficulty } from "@/lib/generated/prisma";
+import { Recipe, Difficulty } from "@prisma/client";
 
 export type RecipeCard = {
     id: string;

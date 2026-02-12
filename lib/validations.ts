@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Difficulty } from "@/lib/generated/prisma";
+import { Difficulty } from "@prisma/client";
 
 /**
  * Recipe Creation/Edit Validation Schema

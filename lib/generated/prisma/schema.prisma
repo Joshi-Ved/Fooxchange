@@ -4,6 +4,7 @@
 
 generator client {
   provider = "prisma-client-js"
+  output   = "../lib/generated/prisma"
 }
 
 datasource db {
@@ -23,9 +24,9 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relations
-  recipes       Recipe[] // Recipes authored by this user
-  savedRecipes  SavedRecipe[] // Recipes saved/favorited by user
-  visionLogs    VisionLog[] // Vision scan history
+  recipes      Recipe[] // Recipes authored by this user
+  savedRecipes SavedRecipe[] // Recipes saved/favorited by user
+  visionLogs   VisionLog[] // Vision scan history
 
   @@index([clerkId])
   @@index([email])
@@ -33,22 +34,22 @@ model User {
 
 // Recipe model - Core entity
 model Recipe {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   title       String
-  description String   @db.Text
+  description String     @db.Text
   imageUrl    String?
   prepTime    Int? // in minutes
   cookTime    Int? // in minutes
-  servings    Int      @default(4)
+  servings    Int        @default(4)
   difficulty  Difficulty @default(EASY)
-  
+
   // Foreign keys
-  authorId    String
-  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
   // Timestamps
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
   ingredients     RecipeIngredient[]
@@ -64,17 +65,17 @@ model Recipe {
 
 // Ingredient model - Normalized ingredient catalog
 model Ingredient {
-  id        String   @id @default(cuid())
-  name      String   @unique // Normalized name e.g., "Tomato"
-  slug      String   @unique // URL-friendly e.g., "tomato"
-  category  String? // e.g., "Vegetable", "Spice", "Dairy"
-  
+  id       String  @id @default(cuid())
+  name     String  @unique // Normalized name e.g., "Tomato"
+  slug     String  @unique // URL-friendly e.g., "tomato"
+  category String? // e.g., "Vegetable", "Spice", "Dairy"
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  recipes              RecipeIngredient[]
-  ingredientEmbedding  IngredientEmbedding?
+  recipes             RecipeIngredient[]
+  ingredientEmbedding IngredientEmbedding?
 
   @@index([slug])
   @@index([category])
@@ -83,18 +84,18 @@ model Ingredient {
 // Join table for many-to-many between Recipe and Ingredient
 // Includes additional metadata like quantity
 model RecipeIngredient {
-  id           String @id @default(cuid())
-  
-  recipeId     String
-  recipe       Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
-  
+  id String @id @default(cuid())
+
+  recipeId String
+  recipe   Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
   ingredientId String
   ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
-  
-  amount       String // e.g., "2 cups", "1 tbsp", "to taste"
-  isOptional   Boolean @default(false)
-  
-  createdAt    DateTime @default(now())
+
+  amount     String // e.g., "2 cups", "1 tbsp", "to taste"
+  isOptional Boolean @default(false)
+
+  createdAt DateTime @default(now())
 
   // Composite unique constraint - each ingredient can appear only once per recipe
   @@unique([recipeId, ingredientId])
@@ -104,15 +105,15 @@ model RecipeIngredient {
 
 // Step model - Ordered cooking instructions
 model Step {
-  id        String   @id @default(cuid())
-  
-  recipeId  String
-  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
-  
-  order     Int // Step number (1, 2, 3, etc.)
-  content   String   @db.Text // The instruction text
-  imageUrl  String? // Optional step-specific image
-  
+  id String @id @default(cuid())
+
+  recipeId String
+  recipe   Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  order    Int // Step number (1, 2, 3, etc.)
+  content  String  @db.Text // The instruction text
+  imageUrl String? // Optional step-specific image
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -123,15 +124,15 @@ model Step {
 
 // SavedRecipe - User's saved/favorited recipes
 model SavedRecipe {
-  id        String   @id @default(cuid())
-  
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  recipeId  String
-  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
-  
-  savedAt   DateTime @default(now())
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  recipeId String
+  recipe   Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  savedAt DateTime @default(now())
 
   // Prevent duplicate saves
   @@unique([userId, recipeId])
@@ -146,58 +147,58 @@ model SavedRecipe {
 // IngredientEmbedding - Stores vector representations of ingredients
 // Used for semantic matching (e.g., "cilantro" matches "coriander")
 model IngredientEmbedding {
-  id           String   @id @default(cuid())
-  
-  ingredientId String   @unique
+  id String @id @default(cuid())
+
+  ingredientId String     @unique
   ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
-  
+
   // Vector representation (OpenAI text-embedding-3-small uses 1536 dimensions)
-  embedding    String   @db.Text // Stored as JSON array, converted to pgvector in queries
-  
+  embedding String @db.Text // Stored as JSON array, converted to pgvector in queries
+
   // Metadata for enhanced matching
-  metadata     Json?    // { flavorProfile: ["spicy", "aromatic"], synonyms: [...] }
-  
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  
+  metadata Json? // { flavorProfile: ["spicy", "aromatic"], synonyms: [...] }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([ingredientId])
 }
 
 // RecipeEmbedding - Stores vector representations of entire recipes
 // Used for semantic recipe discovery ("I want something comforting")
 model RecipeEmbedding {
-  id        String   @id @default(cuid())
-  
-  recipeId  String   @unique
-  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
-  
+  id String @id @default(cuid())
+
+  recipeId String @unique
+  recipe   Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
   // Vector combining title + description + ingredients
-  embedding String   @db.Text // Stored as JSON array
-  
+  embedding String @db.Text // Stored as JSON array
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@index([recipeId])
 }
 
 // VisionLog - Analytics and debugging for computer vision feature
 // Helps improve accuracy over time
 model VisionLog {
-  id             String   @id @default(cuid())
-  
-  userId         String?
-  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  
-  imageUrl       String?  // Temporary URL (auto-deleted after 24h)
-  detectedItems  Json     // Array of detected ingredients with confidence scores
-  latencyMs      Int      // Processing time for performance monitoring
-  
+  id String @id @default(cuid())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  imageUrl      String? // Temporary URL (auto-deleted after 24h)
+  detectedItems Json // Array of detected ingredients with confidence scores
+  latencyMs     Int // Processing time for performance monitoring
+
   // User feedback (did they confirm/edit the results?)
-  userConfirmed  Boolean  @default(false)
-  userEdits      Json?    // What corrections user made
-  
-  createdAt      DateTime @default(now())
-  
+  userConfirmed Boolean @default(false)
+  userEdits     Json? // What corrections user made
+
+  createdAt DateTime @default(now())
+
   @@index([userId])
   @@index([createdAt]) // For analytics queries
 }
@@ -208,4 +209,3 @@ enum Difficulty {
   MEDIUM
   HARD
 }
-

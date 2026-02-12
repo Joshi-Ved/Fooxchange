@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Difficulty } from "@/lib/generated/prisma";
+import { Difficulty } from "@prisma/client";
 import { updateRecipe } from "@/lib/actions/recipe-actions";
 import { UploadButton } from "@/lib/uploadthing";
 import { Button } from "@/components/ui/button";
