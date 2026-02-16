@@ -12,6 +12,7 @@ const isPublicRoute = createRouteMatcher([
     '/api/health',         // Health check for ALB/monitoring
     '/api/uploadthing(.*)', // Upload endpoint (has its own auth)
     '/api/recipes/sync',   // Background sync endpoint (has its own auth)
+    '/manifest.json',      // PWA manifest
 ])
 
 export default clerkMiddleware(async (auth, request) => {

@@ -73,12 +73,12 @@ const nextConfig: NextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'wasm-unsafe-eval'", // WASM for TensorFlow.js (removed unsafe-eval)
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://clerk.browser.js", // Required for Next.js hydration & Clerk
               "worker-src 'self' blob:", // WebWorkers for AI inference
-              "img-src 'self' data: blob: https://utfs.io https://img.clerk.com", // Camera captures + UploadThing + Clerk avatars
+              "img-src 'self' data: blob: https://utfs.io https://img.clerk.com https://*.clerk.accounts.dev", // Camera captures + UploadThing + Clerk avatars
               "style-src 'self' 'unsafe-inline'", // Required for some UI libraries
               "font-src 'self' data:", // Web fonts
-              "connect-src 'self' https://api.clerk.com https://utfs.io https://*.uploadthing.com wss://*.clerk.accounts.dev", // API connections
+              "connect-src 'self' https://api.clerk.com https://utfs.io https://*.uploadthing.com wss://*.clerk.accounts.dev https://*.clerk.accounts.dev", // API connections
               "frame-ancestors 'none'", // Prevent clickjacking
               "base-uri 'self'",
               "form-action 'self'",
