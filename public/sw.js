@@ -216,8 +216,81 @@ self.addEventListener('sync', (event) => {
 });
 
 async function syncRecipes() {
-    // Placeholder: Implement recipe sync logic
-    console.log('[SW] Syncing recipes...');
+    console.log('[SW] Syncing offline recipes...');
+
+    const SYNC_DB_NAME = 'fooxchange-sync-queue';
+    const SYNC_STORE = 'pending-recipes';
+
+    try {
+        // Open the sync queue IndexedDB
+        const db = await new Promise((resolve, reject) => {
+            const request = indexedDB.open(SYNC_DB_NAME, 1);
+            request.onupgradeneeded = () => {
+                request.result.createObjectStore(SYNC_STORE, { keyPath: 'id' });
+            };
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+
+        // Read all pending recipes
+        const pending = await new Promise((resolve, reject) => {
+            const tx = db.transaction(SYNC_STORE, 'readonly');
+            const store = tx.objectStore(SYNC_STORE);
+            const request = store.getAll();
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+
+        if (!pending || pending.length === 0) {
+            console.log('[SW] No pending recipes to sync');
+            return;
+        }
+
+        console.log(`[SW] Found ${pending.length} pending recipe(s)`);
+        let synced = 0;
+
+        for (const recipe of pending) {
+            try {
+                const response = await fetch('/api/recipes/sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(recipe.data),
+                });
+
+                if (response.ok) {
+                    // Remove from queue on success
+                    await new Promise((resolve, reject) => {
+                        const tx = db.transaction(SYNC_STORE, 'readwrite');
+                        const store = tx.objectStore(SYNC_STORE);
+                        const request = store.delete(recipe.id);
+                        request.onsuccess = () => resolve();
+                        request.onerror = () => reject(request.error);
+                    });
+                    synced++;
+                    console.log(`[SW] Synced recipe: ${recipe.data?.title || recipe.id}`);
+                } else {
+                    console.warn(`[SW] Sync failed for ${recipe.id}: HTTP ${response.status}`);
+                }
+            } catch (err) {
+                console.error(`[SW] Failed to sync recipe ${recipe.id}:`, err);
+            }
+        }
+
+        // Notify all clients that sync completed
+        const clients = await self.clients.matchAll();
+        clients.forEach((client) => {
+            client.postMessage({
+                type: 'SYNC_COMPLETE',
+                synced,
+                total: pending.length,
+            });
+        });
+
+        console.log(`[SW] Sync complete: ${synced}/${pending.length} recipes synced`);
+        db.close();
+    } catch (error) {
+        console.error('[SW] Background sync failed:', error);
+    }
 }
 
 console.log('[SW] Service Worker loaded:', CACHE_VERSION);
