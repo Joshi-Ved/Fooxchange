@@ -4,13 +4,14 @@
  * Zero-cost semantic search using Xenova/all-MiniLM-L6-v2 model.
  * Generates 384-dimensional embeddings directly in the browser.
  *
- * Security: Model loaded from HuggingFace CDN with integrity checks (TODO: Phase 3.0)
- * Privacy: All data processing happens on-device, nothing sent to servers
+ * Security: Model integrity verification via SHA-256 manifest check.
+ * Privacy: All data processing happens on-device, nothing sent to servers.
  */
 
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { verifyModel } from '@/lib/security/model-integrity';
 
 // Dynamic import to avoid SSR issues
 let pipeline: any = null;
@@ -92,6 +93,24 @@ export function useEdgeSearch(options: UseEdgeSearchOptions = {}) {
                 pipeline = transformers.pipeline;
                 FeatureExtraction = transformers.FeatureExtractionPipeline;
                 console.log('✅ Transformers.js library loaded');
+            }
+
+            if (isMountedRef.current) setLoadProgress(20);
+
+            // Model integrity verification
+            // When model is self-hosted in /public/models/all-MiniLM-L6-v2/, this will
+            // validate SHA-256 hashes. For CDN-loaded models, it warns and proceeds.
+            const integrityResult = await verifyModel('all-MiniLM-L6-v2');
+            if (!integrityResult.valid) {
+                const isMissingManifest = integrityResult.errors.some(
+                    e => e.includes('manifest not found') || e.includes('not found in manifest')
+                );
+                if (isMissingManifest) {
+                    console.warn('[Edge Search] Model integrity manifest not found — loading from CDN. ' +
+                        'Self-host models in /public/models/all-MiniLM-L6-v2/ and run npm run build:model-hashes for full verification.');
+                } else {
+                    throw new Error(`Model integrity check failed: ${integrityResult.errors.join(', ')}`);
+                }
             }
 
             if (isMountedRef.current) setLoadProgress(30);

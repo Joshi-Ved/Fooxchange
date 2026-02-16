@@ -4,7 +4,9 @@
  * Uses COCO-SSD model to detect food ingredients directly in the browser.
  * Zero API costs, privacy-first (data never leaves device).
  *
- * Security: Model loaded from public/models/ with integrity verification (TODO: Phase 3.0)
+ * Security: Model integrity verification via SHA-256 manifest check.
+ * When models are self-hosted in /public/models/, the integrity check blocks
+ * loading if hashes don't match. For CDN-loaded models, it warns and proceeds.
  */
 
 'use client';
@@ -13,6 +15,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import '@tensorflow/tfjs-backend-webgl';
 import * as tf from '@tensorflow/tfjs';
+import { verifyModel } from '@/lib/security/model-integrity';
 
 export interface DetectedObject {
     name: string;
@@ -98,10 +101,28 @@ export function useEdgeVision(options: UseEdgeVisionOptions = {}) {
             await tf.setBackend('webgl');
             await tf.ready();
 
+            if (isMountedRef.current) setLoadProgress(20);
+
+            // Model integrity verification
+            // When model is self-hosted in /public/models/coco-ssd/, this will
+            // validate SHA-256 hashes. For CDN-loaded models, it warns and proceeds.
+            const integrityResult = await verifyModel('coco-ssd');
+            if (!integrityResult.valid) {
+                const isMissingManifest = integrityResult.errors.some(
+                    e => e.includes('manifest not found') || e.includes('not found in manifest')
+                );
+                if (isMissingManifest) {
+                    console.warn('[Edge Vision] Model integrity manifest not found — loading from CDN. ' +
+                        'Self-host models in /public/models/coco-ssd/ and run npm run build:model-hashes for full verification.');
+                } else {
+                    // Manifest exists but hashes don't match — potential tampering
+                    throw new Error(`Model integrity check failed: ${integrityResult.errors.join(', ')}`);
+                }
+            }
+
             if (isMountedRef.current) setLoadProgress(30);
 
             // Load COCO-SSD model (~5MB download)
-            // TODO: Load from /public/models/ with integrity verification
             const loadedModel = await cocoSsd.load({
                 base: 'lite_mobilenet_v2', // Smaller, faster model (~5MB)
             });

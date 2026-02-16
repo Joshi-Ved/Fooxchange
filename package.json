@@ -14,7 +14,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "build:model-hashes": "ts-node scripts/generate-model-hashes.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.37.1",
