@@ -95,7 +95,7 @@ export function useSecureStorage<T = unknown>(
         }
 
         try {
-            await secureSet(key, value, getPassphrase());
+            await secureSet(key, value, { password: getPassphrase() });
 
             if (isMountedRef.current) {
                 setData(value);
@@ -118,7 +118,7 @@ export function useSecureStorage<T = unknown>(
         }
 
         try {
-            const result = await secureGet<T>(key, getPassphrase());
+            const result = await secureGet<T>(key, { password: getPassphrase() });
 
             if (isMountedRef.current) {
                 setData(result);

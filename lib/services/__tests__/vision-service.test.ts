@@ -2,31 +2,10 @@
  * Unit Tests for Vision Service
  */
 
-import { identifyIngredientsFromImage, matchIngredientsToDatabase } from '@/lib/services/vision-service';
+import { matchIngredientsToDatabase, logVisionAnalysis } from '@/lib/services/vision-service';
 import { db } from '@/lib/db';
 
 describe('Vision Service', () => {
-    describe('identifyIngredientsFromImage', () => {
-        it('should return empty ingredients (client-side detection is primary)', async () => {
-            const mockBuffer = Buffer.from('fake-image-data');
-
-            const result = await identifyIngredientsFromImage(mockBuffer);
-
-            expect(result.ingredients).toHaveLength(0);
-            expect(result.processingTimeMs).toBeGreaterThanOrEqual(0);
-        });
-
-        it('should log vision analysis when userId is provided', async () => {
-            const mockBuffer = Buffer.from('fake-image-data');
-            const userId = 'test-user-123';
-
-            await identifyIngredientsFromImage(mockBuffer, userId);
-
-            // Verify vision log was created
-            expect(db.visionLog.create).toHaveBeenCalled();
-        });
-    });
-
     describe('matchIngredientsToDatabase', () => {
         it('should find exact matches in database', async () => {
             const mockIngredient = {
@@ -70,6 +49,35 @@ describe('Vision Service', () => {
             const results = await matchIngredientsToDatabase(['UnknownIngredient']);
 
             expect(results[0].matches).toHaveLength(0);
+        });
+    });
+
+    describe('logVisionAnalysis', () => {
+        it('should log vision analysis to database', async () => {
+            const userId = 'test-user-123';
+            const ingredients = [
+                { name: 'Tomato', confidence: 0.95 },
+                { name: 'Onion', confidence: 0.88 },
+            ];
+
+            await logVisionAnalysis(userId, ingredients, 150);
+
+            expect(db.visionLog.create).toHaveBeenCalledWith({
+                data: expect.objectContaining({
+                    userId,
+                    detectedItems: ingredients,
+                    latencyMs: 150,
+                }),
+            });
+        });
+
+        it('should not throw on logging failure', async () => {
+            (db.visionLog.create as jest.Mock).mockRejectedValueOnce(new Error('DB error'));
+
+            // Should not throw
+            await expect(
+                logVisionAnalysis('user-123', [], 100)
+            ).resolves.toBeUndefined();
         });
     });
 });

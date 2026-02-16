@@ -1,11 +1,13 @@
 /**
  * Vision Service - Server-side ingredient matching
  *
- * The actual detection runs client-side via TensorFlow.js (Edge AI).
- * This service handles matching detected items with the database.
+ * The actual image detection runs client-side via TensorFlow.js (Edge AI).
+ * This service handles:
+ * 1. Matching detected item names against the ingredient database
+ * 2. Logging vision analysis attempts for analytics
  *
- * @see components/camera-scanner.tsx for the client-side YOLO/COCO-SSD detection
- * @see lib/hooks/use-edge-vision.ts for the Edge AI hook
+ * @see components/camera-scanner.tsx — client-side COCO-SSD detection
+ * @see lib/hooks/use-edge-vision.ts — Edge AI hook
  */
 
 import { db } from '@/lib/db';
@@ -17,50 +19,12 @@ export interface DetectedIngredient {
     unit?: string;
 }
 
-export interface VisionAnalysisResult {
-    ingredients: DetectedIngredient[];
-    processingTimeMs: number;
-    imageUrl?: string;
-}
-
 /**
- * Server-side fallback: Identify ingredients from image buffer
- * 
- * NOTE: Primary detection happens client-side via TensorFlow.js COCO-SSD.
- * This function is a server-side fallback that returns a message
- * directing users to use the camera scanner instead.
- * 
- * @param imageBuffer - Image buffer (JPEG, PNG, WebP)
- * @param userId - Optional user ID for logging
- * @returns Detected ingredients with confidence scores
- */
-export async function identifyIngredientsFromImage(
-    imageBuffer: Buffer,
-    userId?: string
-): Promise<VisionAnalysisResult> {
-    const startTime = Date.now();
-
-    // Client-side detection is the primary method.
-    // This server fallback returns an empty result with guidance.
-    const processingTimeMs = Date.now() - startTime;
-
-    // Log the attempt
-    if (userId) {
-        await logVisionAnalysis(userId, [], processingTimeMs);
-    }
-
-    return {
-        ingredients: [],
-        processingTimeMs,
-    };
-}
-
-/**
- * Match detected ingredients with database entries
- * Uses fuzzy matching to handle variations in naming
- * 
- * @param detectedNames - Array of ingredient names from vision API
- * @returns Array of matched database ingredients with suggestions
+ * Match detected ingredient names against the database.
+ * Uses exact match first, then partial (substring) matching.
+ *
+ * @param detectedNames — Array of ingredient names from client-side detection
+ * @returns Array of matches with match type (exact, partial, or empty)
  */
 export async function matchIngredientsToDatabase(
     detectedNames: string[]
@@ -105,7 +69,7 @@ export async function matchIngredientsToDatabase(
             continue;
         }
 
-        // No match - suggest creating new ingredient
+        // No match — UI can suggest creating a new ingredient
         results.push({
             detected: name,
             matches: [],
@@ -116,9 +80,14 @@ export async function matchIngredientsToDatabase(
 }
 
 /**
- * Log vision analysis for analytics and improvement
+ * Log vision analysis for analytics and improvement.
+ * Called by API routes after client-side detection results are submitted.
+ *
+ * @param userId — Clerk user ID
+ * @param ingredients — Array of detected ingredients from client
+ * @param latencyMs — Client-side processing time
  */
-async function logVisionAnalysis(
+export async function logVisionAnalysis(
     userId: string,
     ingredients: DetectedIngredient[],
     latencyMs: number
@@ -134,31 +103,6 @@ async function logVisionAnalysis(
         });
     } catch (error) {
         // Logging failure shouldn't break the main flow
-        console.error('Failed to log vision analysis:', error);
+        console.error('[Vision Service] Failed to log analysis:', error);
     }
-}
-
-/**
- * Batch process multiple images
- * Useful for processing ingredient inventory in bulk
- */
-export async function batchIdentifyIngredients(
-    images: Buffer[],
-    userId?: string
-): Promise<VisionAnalysisResult[]> {
-    const results: VisionAnalysisResult[] = [];
-
-    for (let i = 0; i < images.length; i++) {
-        console.log(`Processing image ${i + 1}/${images.length}`);
-
-        const result = await identifyIngredientsFromImage(images[i], userId);
-        results.push(result);
-
-        // Rate limiting: wait 1 second between requests
-        if (i < images.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-    }
-
-    return results;
 }

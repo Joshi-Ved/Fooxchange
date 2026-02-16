@@ -4,6 +4,7 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { recipeFormSchema, type RecipeFormData } from "@/lib/validations";
+import { generateRecipeEmbedding } from "@/lib/services/embedding-service";
 
 /**
  * Server Action: Create a new recipe
@@ -106,7 +107,12 @@ export async function createRecipe(data: RecipeFormData) {
             return newRecipe;
         });
 
-        // 5. Revalidate relevant paths
+        // 5. Generate embedding for semantic search (async, non-blocking)
+        generateRecipeEmbeddingForSearch(recipe.id, validatedData).catch((err) =>
+            console.error('[Recipe Action] Embedding generation failed (non-critical):', err)
+        );
+
+        // 6. Revalidate relevant paths
         revalidatePath("/");
         revalidatePath("/recipes");
 
@@ -217,6 +223,11 @@ export async function updateRecipe(recipeId: string, data: RecipeFormData) {
 
             return updatedRecipe;
         });
+
+        // Generate updated embedding for semantic search (async, non-blocking)
+        generateRecipeEmbeddingForSearch(recipe.id, validatedData).catch((err) =>
+            console.error('[Recipe Action] Embedding update failed (non-critical):', err)
+        );
 
         revalidatePath("/");
         revalidatePath("/recipes");
@@ -449,4 +460,35 @@ export async function toggleSaveRecipe(recipeId: string) {
         console.error("Error toggling save:", error);
         return { error: "Failed to save recipe" };
     }
+}
+
+/**
+ * Helper: Generate and store a recipe embedding for semantic search.
+ * Called after recipe creation/update. Non-blocking — failures are logged but
+ * don't affect the user-facing response.
+ */
+async function generateRecipeEmbeddingForSearch(
+    recipeId: string,
+    data: { title: string; description: string; ingredients: { name: string }[] }
+): Promise<void> {
+    const ingredientNames = data.ingredients.map((i) => i.name);
+    const embedding = await generateRecipeEmbedding(
+        data.title,
+        data.description,
+        ingredientNames
+    );
+
+    // Upsert the embedding row
+    await db.recipeEmbedding.upsert({
+        where: { recipeId },
+        update: {
+            embedding: JSON.stringify(embedding),
+        },
+        create: {
+            recipeId,
+            embedding: JSON.stringify(embedding),
+        },
+    });
+
+    console.log(`[Recipe Action] Embedding generated for recipe ${recipeId} (${embedding.length}d)`);
 }
