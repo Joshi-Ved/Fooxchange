@@ -14,6 +14,10 @@ import * as embeddingService from '@/lib/services/embedding-service';
 // Embedding service mock
 jest.mock('@/lib/services/embedding-service');
 
+// Use 384-dim vectors to match Edge AI model (all-MiniLM-L6-v2)
+const MOCK_EMBEDDING_DIM = 384;
+const mockEmbedding = () => Array(MOCK_EMBEDDING_DIM).fill(0.1);
+
 describe('ML Service', () => {
     describe('predictCookingDifficulty', () => {
         it('should predict easy difficulty for simple recipes', () => {
@@ -70,9 +74,9 @@ describe('ML Service', () => {
 
     describe('getIntelligentRecommendations', () => {
         beforeEach(() => {
-            // Mock embedding generation
+            // Mock embedding generation — 384-dim to match MiniLM
             (embeddingService.generateEmbedding as jest.Mock).mockResolvedValue(
-                Array(1536).fill(0.1)
+                mockEmbedding()
             );
 
             // Mock cosine similarity
@@ -87,7 +91,7 @@ describe('ML Service', () => {
                     prepTime: 25,
                     cookTime: 30,
                     tags: [],
-                    embedding: JSON.stringify(Array(1536).fill(0.1)),
+                    embedding: JSON.stringify(mockEmbedding()),
                     recipe: {
                         id: '1',
                         title: 'Chicken Rice',
@@ -119,7 +123,7 @@ describe('ML Service', () => {
             const mockRecipes = [
                 {
                     id: '1',
-                    embedding: JSON.stringify(Array(1536).fill(0.1)),
+                    embedding: JSON.stringify(mockEmbedding()),
                     recipe: {
                         id: '1',
                         title: 'Beef Stew',
@@ -135,7 +139,7 @@ describe('ML Service', () => {
 
             (db.recipe.findMany as jest.Mock).mockResolvedValue([]);
             (db.recipeEmbedding.findMany as jest.Mock).mockResolvedValue(mockRecipes);
-            (embeddingService.generateEmbedding as jest.Mock).mockResolvedValue(Array(1536).fill(0.1));
+            (embeddingService.generateEmbedding as jest.Mock).mockResolvedValue(mockEmbedding());
 
             const result = await getIntelligentRecommendations(
                 'user-123',
@@ -151,9 +155,7 @@ describe('ML Service', () => {
     });
 
     describe('estimateNutrition', () => {
-        it('should return nutrition estimates from AI', async () => {
-            // This would need proper mocking of Gemini API
-            // For now, testing error fallback
+        it('should return nutrition estimates from heuristic rules', async () => {
             const recipe = {
                 title: 'Test Recipe',
                 servings: 4,
@@ -171,13 +173,13 @@ describe('ML Service', () => {
     });
 
     describe('generateCookingTips', () => {
-        it('should return an array of tips', async () => {
+        it('should return an array of tips', () => {
             const recipe = {
                 title: 'Pasta Carbonara',
                 description: 'Classic Italian pasta',
             };
 
-            const result = await generateCookingTips(recipe);
+            const result = generateCookingTips(recipe);
 
             expect(Array.isArray(result)).toBe(true);
         });

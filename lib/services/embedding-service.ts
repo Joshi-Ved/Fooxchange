@@ -1,39 +1,65 @@
 /**
- * Embedding Service - Hybrid approach
+ * Embedding Service — Edge-First Architecture
  *
- * Uses OpenAI's text-embedding-3-small when available,
- * falls back to simple hash-based embeddings for basic functionality.
+ * Server-side embedding generation using Transformers.js (all-MiniLM-L6-v2).
+ * Produces 384-dimensional vectors, identical to the client-side Edge Search hook.
  *
- * For production edge search, use Transformers.js (Edge Search) in the browser.
- * @see lib/hooks/use-edge-search.ts for client-side embeddings
+ * Zero-cost: no external API keys required.
+ * Privacy-first: all processing happens locally.
+ *
+ * @see lib/hooks/use-edge-search.ts — client-side equivalent
+ * @see lib/security/vector-validation.ts — validation for incoming vectors
  */
 
-// Optional OpenAI import (for backward compatibility during migration)
-let openai: any = null;
-try {
-    if (process.env.OPENAI_API_KEY) {
-        const OpenAI = require('openai');
-        openai = new OpenAI({
-            apiKey: process.env.OPENAI_API_KEY,
-        });
-    }
-} catch (error) {
-    console.warn('[Embedding Service] OpenAI not available. Using simple hash embeddings as fallback.');
+// Model configuration — must match client-side hook exactly
+export const EMBEDDING_MODEL = 'Xenova/all-MiniLM-L6-v2';
+export const EMBEDDING_DIMENSIONS = 384;
+
+// Lazy-loaded pipeline singleton
+let pipelineInstance: any = null;
+let pipelineLoading: Promise<any> | null = null;
+
+/**
+ * Lazily initializes the Transformers.js feature-extraction pipeline.
+ * The model is downloaded once and cached by the library.
+ */
+async function getPipeline(): Promise<any> {
+    if (pipelineInstance) return pipelineInstance;
+
+    // Prevent duplicate loading if called concurrently
+    if (pipelineLoading) return pipelineLoading;
+
+    pipelineLoading = (async () => {
+        try {
+            const { pipeline } = await import('@xenova/transformers');
+            pipelineInstance = await pipeline('feature-extraction', EMBEDDING_MODEL, {
+                // Use quantized model for faster loading on server
+                quantized: true,
+            });
+            console.log(`[Embedding Service] Model loaded: ${EMBEDDING_MODEL} (${EMBEDDING_DIMENSIONS}d)`);
+            return pipelineInstance;
+        } catch (error) {
+            pipelineLoading = null; // Allow retry on failure
+            console.error('[Embedding Service] Failed to load model:', error);
+            throw error;
+        }
+    })();
+
+    return pipelineLoading;
 }
 
 /**
- * Simple deterministic hash-based embedding fallback
+ * Simple deterministic hash-based embedding fallback.
  * Produces a 384-dimensional vector from text using character-level hashing.
- * NOT semantically meaningful, but allows the system to function without API keys.
+ * NOT semantically meaningful — used only when the ML model fails to load.
  */
-function simpleHashEmbedding(text: string, dimensions: number = 384): number[] {
+function simpleHashEmbedding(text: string, dimensions: number = EMBEDDING_DIMENSIONS): number[] {
     const embedding = new Array(dimensions).fill(0);
     const normalized = text.toLowerCase().trim();
 
     for (let i = 0; i < normalized.length; i++) {
         const charCode = normalized.charCodeAt(i);
         const position = i % dimensions;
-        // Use a simple hash function to distribute values
         embedding[position] += Math.sin(charCode * (i + 1) * 0.1) * 0.1;
         embedding[(position + 1) % dimensions] += Math.cos(charCode * (i + 1) * 0.1) * 0.1;
     }
@@ -50,84 +76,80 @@ function simpleHashEmbedding(text: string, dimensions: number = 384): number[] {
 }
 
 /**
- * Generate embedding vector for text
- * Uses OpenAI when available, falls back to simple hash embedding
+ * Generate embedding vector for text.
+ * Uses Transformers.js (MiniLM) server-side, matching the client's Edge Search hook.
+ * Falls back to hash embedding if the model fails to load.
+ *
+ * @param text — input text to embed
+ * @returns 384-dimensional embedding vector
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
     if (!text || text.trim().length === 0) {
         throw new Error('Text cannot be empty for embedding generation');
     }
 
-    // Use OpenAI if available
-    if (openai) {
-        try {
-            const response = await openai.embeddings.create({
-                model: 'text-embedding-3-small',
-                input: text.trim(),
-                encoding_format: 'float',
-            });
+    try {
+        const extractor = await getPipeline();
+        const output = await extractor(text.trim(), {
+            pooling: 'mean',
+            normalize: true,
+        });
 
-            if (!response.data || response.data.length === 0) {
-                throw new Error('No embedding returned from OpenAI');
-            }
-
-            return response.data[0].embedding;
-        } catch (error) {
-            console.error('OpenAI embedding failed, using fallback:', error);
-        }
+        // output.data is a Float32Array — convert to number[]
+        return Array.from(output.data as Float32Array);
+    } catch (error) {
+        console.warn('[Embedding Service] Model inference failed, using hash fallback:', error);
+        return simpleHashEmbedding(text);
     }
-
-    // Fallback: simple hash-based embedding
-    return simpleHashEmbedding(text);
 }
 
 /**
- * Generate embedding for an ingredient
- * Combines the ingredient name with its category for better semantic representation
- * 
- * @param name - Ingredient name (e.g., "Tomato")
- * @param category - Optional category (e.g., "Vegetable")
+ * Generate embedding for an ingredient.
+ * Combines the ingredient name with its category for richer semantics.
+ *
+ * @param name — Ingredient name (e.g., "Tomato")
+ * @param category — Optional category (e.g., "Vegetable")
  */
 export async function generateIngredientEmbedding(
     name: string,
     category?: string | null
 ): Promise<number[]> {
-    // Combine name and category for richer embedding
     const text = category ? `${name} (${category})` : name;
     return generateEmbedding(text);
 }
 
 /**
- * Generate embedding for a recipe
- * Combines title, description, and ingredients for comprehensive representation
- * 
- * @param title - Recipe title
- * @param description - Recipe description
- * @param ingredients - Array of ingredient names
+ * Generate embedding for a recipe.
+ * Combines title, description, and ingredients for comprehensive representation.
+ *
+ * @param title — Recipe title
+ * @param description — Recipe description
+ * @param ingredients — Array of ingredient names
  */
 export async function generateRecipeEmbedding(
     title: string,
     description: string,
     ingredients: string[]
 ): Promise<number[]> {
-    // Create a rich text representation of the recipe
     const ingredientList = ingredients.join(', ');
     const text = `${title}. ${description}. Ingredients: ${ingredientList}`;
-
     return generateEmbedding(text);
 }
 
 /**
- * Calculate cosine similarity between two vectors
- * Used to find how similar two embeddings are (0 = different, 1 = identical)
- * 
- * @param vecA - First vector
- * @param vecB - Second vector
+ * Calculate cosine similarity between two vectors.
+ * Returns a value between 0 (different) and 1 (identical).
+ *
+ * @param vecA — First vector
+ * @param vecB — Second vector
  * @returns Similarity score between 0 and 1
  */
 export function cosineSimilarity(vecA: number[], vecB: number[]): number {
     if (vecA.length !== vecB.length) {
-        throw new Error('Vectors must have the same length');
+        throw new Error(
+            `Vector dimension mismatch: ${vecA.length} vs ${vecB.length}. ` +
+            `Both must be ${EMBEDDING_DIMENSIONS}-dimensional.`
+        );
     }
 
     let dotProduct = 0;
@@ -151,33 +173,32 @@ export function cosineSimilarity(vecA: number[], vecB: number[]): number {
 }
 
 /**
- * Batch generate embeddings with rate limiting
- * OpenAI has rate limits, so we process in batches with delays
- * 
- * @param texts - Array of texts to embed
- * @param batchSize - Number of texts to process at once
- * @param delayMs - Delay between batches in milliseconds
+ * Batch generate embeddings.
+ * Processes texts sequentially to keep server memory usage bounded.
+ *
+ * @param texts — Array of texts to embed
+ * @param batchSize — Number of texts to process at once
+ * @param delayMs — Delay between batches (for GC breathing room)
  */
 export async function batchGenerateEmbeddings(
     texts: string[],
-    batchSize: number = 100,
-    delayMs: number = 1000
+    batchSize: number = 32,
+    delayMs: number = 100
 ): Promise<number[][]> {
     const embeddings: number[][] = [];
 
     for (let i = 0; i < texts.length; i += batchSize) {
         const batch = texts.slice(i, i + batchSize);
 
-        console.log(`Processing batch ${i / batchSize + 1}/${Math.ceil(texts.length / batchSize)}`);
+        console.log(`[Embedding Service] Batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(texts.length / batchSize)}`);
 
-        // Process batch concurrently
         const batchResults = await Promise.all(
             batch.map((text) => generateEmbedding(text))
         );
 
         embeddings.push(...batchResults);
 
-        // Delay between batches to respect rate limits
+        // Brief delay between batches
         if (i + batchSize < texts.length) {
             await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
