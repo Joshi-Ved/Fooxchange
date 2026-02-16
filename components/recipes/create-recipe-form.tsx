@@ -120,6 +120,21 @@ export function CreateRecipeForm() {
                 }
             }
 
+            // detailed validation
+            const validIngredients = ingredients.filter((ing) => ing.name.trim() !== "" && ing.amount.trim() !== "");
+            if (validIngredients.length === 0) {
+                setError("Please add at least one ingredient with both a name and amount.");
+                setIsSubmitting(false);
+                return;
+            }
+
+            const validSteps = steps.filter((step) => step.content.trim() !== "");
+            if (validSteps.length === 0) {
+                setError("Please add at least one cooking step.");
+                setIsSubmitting(false);
+                return;
+            }
+
             const result = await createRecipe({
                 title,
                 description,
@@ -128,8 +143,8 @@ export function CreateRecipeForm() {
                 cookTime,
                 servings,
                 difficulty: difficulty as any,
-                ingredients: ingredients.filter((ing) => ing.name && ing.amount),
-                steps: steps.filter((step) => step.content),
+                ingredients: validIngredients,
+                steps: validSteps,
             });
 
             if (result.error) {

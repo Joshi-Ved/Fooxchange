@@ -2,6 +2,7 @@
 
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { db } from "@/lib/db";
 import { recipeFormSchema, type RecipeFormData } from "@/lib/validations";
 import { generateRecipeEmbedding } from "@/lib/services/embedding-service";
@@ -18,17 +19,21 @@ import { generateRecipeEmbedding } from "@/lib/services/embedding-service";
  * @returns Created recipe ID or error
  */
 export async function createRecipe(data: RecipeFormData) {
+    console.log("[createRecipe] Starting recipe creation...", data.title);
     try {
         // 1. Authentication check
         const { userId } = await auth();
         const user = await currentUser();
+        console.log("[createRecipe] User:", userId, user?.emailAddresses[0]?.emailAddress);
 
         if (!userId || !user) {
+            console.log("[createRecipe] No user found");
             return { error: "You must be logged in to create a recipe" };
         }
 
         // 2. Validate input data
         const validatedData = recipeFormSchema.parse(data);
+        console.log("[createRecipe] Validation passed");
 
         // 3. Check if user exists in our DB, create if not (Clerk sync)
         let dbUser = await db.user.findUnique({
@@ -36,6 +41,7 @@ export async function createRecipe(data: RecipeFormData) {
         });
 
         if (!dbUser) {
+            console.log("[createRecipe] Creating new DB user for", userId);
             dbUser = await db.user.create({
                 data: {
                     clerkId: userId,
@@ -45,8 +51,10 @@ export async function createRecipe(data: RecipeFormData) {
                 },
             });
         }
+        console.log("[createRecipe] DB User ID:", dbUser.id);
 
         // 4. Create recipe with ingredients and steps in a transaction
+        console.log("[createRecipe] Starting transaction...");
         const recipe = await db.$transaction(async (tx) => {
             // Create the recipe
             const newRecipe = await tx.recipe.create({
@@ -58,9 +66,10 @@ export async function createRecipe(data: RecipeFormData) {
                     cookTime: validatedData.cookTime || null,
                     servings: validatedData.servings,
                     difficulty: validatedData.difficulty,
-                    authorId: dbUser.id,
+                    authorId: dbUser!.id, // Non-null assertion safe due to check above
                 },
             });
+            console.log("[createRecipe] Recipe created:", newRecipe.id);
 
             // Create or find ingredients and link them
             for (const ing of validatedData.ingredients) {
@@ -91,6 +100,7 @@ export async function createRecipe(data: RecipeFormData) {
                     },
                 });
             }
+            console.log("[createRecipe] Ingredients linked");
 
             // Create steps
             for (let i = 0; i < validatedData.steps.length; i++) {
@@ -103,14 +113,21 @@ export async function createRecipe(data: RecipeFormData) {
                     },
                 });
             }
+            console.log("[createRecipe] Steps created");
 
             return newRecipe;
         });
 
+        console.log("[createRecipe] Transaction committed. Recipe ID:", recipe.id);
+
         // 5. Generate embedding for semantic search (async, non-blocking)
+        // Note: In Vercel serverless, this promise might be killed if not awaited.
+        // For debugging, avoiding await to keep it fast, but logging initiation.
+        /* TEMPORARILY DISABLED FOR DEBUGGING
         generateRecipeEmbeddingForSearch(recipe.id, validatedData).catch((err) =>
-            console.error('[Recipe Action] Embedding generation failed (non-critical):', err)
+            console.error('[Recipe Action] Embedding generation failed:', err)
         );
+        */
 
         // 6. Revalidate relevant paths
         revalidatePath("/");
@@ -119,6 +136,10 @@ export async function createRecipe(data: RecipeFormData) {
         return { success: true, recipeId: recipe.id };
     } catch (error) {
         console.error("Error creating recipe:", error);
+
+        if (error instanceof z.ZodError) {
+            return { error: error.issues.map((e) => e.message).join(", ") };
+        }
 
         if (error instanceof Error) {
             return { error: error.message };
