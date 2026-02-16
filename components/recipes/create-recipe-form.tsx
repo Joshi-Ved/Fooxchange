@@ -1,15 +1,24 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, lazy, Suspense } from "react";
 import { useRouter } from "next/navigation";
-import { Difficulty } from "@prisma/client";
 import { createRecipe } from "@/lib/actions/recipe-actions";
-import { UploadButton } from "@/lib/uploadthing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { CameraScanner } from "@/components/camera-scanner";
-import { Plus, Trash2, Clock, Users, ChefHat, ImageIcon, Camera } from "lucide-react";
+import { Plus, Trash2, Clock, Users, ChefHat, ImageIcon, Camera, Upload } from "lucide-react";
+
+// Lazy-load heavy components to prevent hydration failures
+const CameraScanner = lazy(() =>
+    import("@/components/camera-scanner").then((m) => ({ default: m.CameraScanner }))
+);
+
+// Difficulty options as simple strings (avoids importing @prisma/client on client)
+const DIFFICULTY_OPTIONS = [
+    { value: "EASY", label: "Easy" },
+    { value: "MEDIUM", label: "Medium" },
+    { value: "HARD", label: "Hard" },
+] as const;
 
 export function CreateRecipeForm() {
     const router = useRouter();
@@ -20,10 +29,11 @@ export function CreateRecipeForm() {
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
     const [imageUrl, setImageUrl] = useState("");
+    const [imageFile, setImageFile] = useState<File | null>(null);
     const [prepTime, setPrepTime] = useState<number | undefined>();
     const [cookTime, setCookTime] = useState<number | undefined>();
     const [servings, setServings] = useState(4);
-    const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.EASY);
+    const [difficulty, setDifficulty] = useState("EASY");
 
     // Dynamic arrays
     const [ingredients, setIngredients] = useState([
@@ -71,6 +81,16 @@ export function CreateRecipeForm() {
         setSteps(updated);
     };
 
+    // Handle file selection for recipe photo
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setImageFile(file);
+            const url = URL.createObjectURL(file);
+            setImageUrl(url);
+        }
+    };
+
     // Form submission
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -78,14 +98,36 @@ export function CreateRecipeForm() {
         setError(null);
 
         try {
+            // Upload image file first if selected
+            let finalImageUrl = imageUrl;
+
+            if (imageFile) {
+                try {
+                    const formData = new FormData();
+                    formData.append("file", imageFile);
+                    const uploadRes = await fetch("/api/upload", {
+                        method: "POST",
+                        body: formData,
+                    });
+                    if (uploadRes.ok) {
+                        const data = await uploadRes.json();
+                        finalImageUrl = data.url;
+                    }
+                } catch {
+                    // If upload fails, try using the blob URL or skip image
+                    console.warn("Image upload failed, proceeding without image");
+                    finalImageUrl = "";
+                }
+            }
+
             const result = await createRecipe({
                 title,
                 description,
-                imageUrl: imageUrl || undefined,
+                imageUrl: finalImageUrl || undefined,
                 prepTime,
                 cookTime,
                 servings,
-                difficulty,
+                difficulty: difficulty as any,
                 ingredients: ingredients.filter((ing) => ing.name && ing.amount),
                 steps: steps.filter((step) => step.content),
             });
@@ -167,7 +209,10 @@ export function CreateRecipeForm() {
                                     variant="destructive"
                                     size="sm"
                                     className="absolute top-2 right-2"
-                                    onClick={() => setImageUrl("")}
+                                    onClick={() => {
+                                        setImageUrl("");
+                                        setImageFile(null);
+                                    }}
                                 >
                                     Remove
                                 </Button>
@@ -175,41 +220,27 @@ export function CreateRecipeForm() {
                         ) : (
                             <div className="border-2 border-dashed rounded-lg p-8 text-center space-y-4">
                                 <ImageIcon className="w-12 h-12 mx-auto text-muted-foreground" />
-                                <UploadButton
-                                    endpoint="recipeImage"
-                                    onClientUploadComplete={(res) => {
-                                        if (res?.[0]?.url) {
-                                            setImageUrl(res[0].url);
-                                        }
-                                    }}
-                                    onUploadError={(error: Error) => {
-                                        setError(`Upload failed: ${error.message}`);
-                                    }}
-                                />
-                                <div className="text-xs text-muted-foreground">or</div>
+                                <p className="text-sm text-muted-foreground">
+                                    Upload a photo of your dish
+                                </p>
                                 <input
                                     ref={fileInputRef}
                                     type="file"
                                     accept="image/*"
+                                    capture="environment"
                                     className="hidden"
-                                    onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) {
-                                            // Create a local preview URL
-                                            const url = URL.createObjectURL(file);
-                                            setImageUrl(url);
-                                        }
-                                    }}
+                                    onChange={handleFileSelect}
                                 />
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => fileInputRef.current?.click()}
-                                >
-                                    <ImageIcon className="w-4 h-4 mr-2" />
-                                    Choose from device
-                                </Button>
+                                <div className="flex gap-2 justify-center">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
+                                        <Upload className="w-4 h-4 mr-2" />
+                                        Choose Photo
+                                    </Button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -268,12 +299,14 @@ export function CreateRecipeForm() {
                         <select
                             id="difficulty"
                             value={difficulty}
-                            onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+                            onChange={(e) => setDifficulty(e.target.value)}
                             className="w-full px-3 py-2 border rounded-md"
                         >
-                            <option value={Difficulty.EASY}>Easy</option>
-                            <option value={Difficulty.MEDIUM}>Medium</option>
-                            <option value={Difficulty.HARD}>Hard</option>
+                            {DIFFICULTY_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                </option>
+                            ))}
                         </select>
                     </div>
                 </div>
@@ -386,19 +419,24 @@ export function CreateRecipeForm() {
                 </div>
             </form>
 
-            {/* Camera Scanner Overlay */}
-            {
-                showCamera && (
+            {/* Camera Scanner Overlay (lazy-loaded) */}
+            {showCamera && (
+                <Suspense fallback={
+                    <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+                        <div className="text-white text-center">
+                            <div className="animate-spin w-8 h-8 border-2 border-white border-t-transparent rounded-full mx-auto mb-4" />
+                            <p>Loading camera scanner...</p>
+                        </div>
+                    </div>
+                }>
                     <CameraScanner
                         onIngredientsDetected={(detected) => {
-                            // Add detected ingredients to the form
                             const newIngredients = detected.map((item) => ({
                                 name: item.name.charAt(0).toUpperCase() + item.name.slice(1),
                                 amount: "",
                                 isOptional: false,
                             }));
                             setIngredients((prev) => {
-                                // Remove empty rows then add detected items
                                 const existing = prev.filter((ing) => ing.name.trim() !== "");
                                 return [...existing, ...newIngredients];
                             });
@@ -406,8 +444,8 @@ export function CreateRecipeForm() {
                         }}
                         onClose={() => setShowCamera(false)}
                     />
-                )
-            }
+                </Suspense>
+            )}
         </>
     );
 }

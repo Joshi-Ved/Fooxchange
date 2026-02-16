@@ -1,14 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Difficulty } from "@prisma/client";
 import { updateRecipe } from "@/lib/actions/recipe-actions";
-import { UploadButton } from "@/lib/uploadthing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Clock, Users, ChefHat, ImageIcon, Save } from "lucide-react";
+import { Plus, Trash2, Clock, Users, ChefHat, ImageIcon, Save, Upload } from "lucide-react";
+
+// Difficulty options as simple strings (avoids importing @prisma/client on client)
+const DIFFICULTY_OPTIONS = [
+    { value: "EASY", label: "Easy" },
+    { value: "MEDIUM", label: "Medium" },
+    { value: "HARD", label: "Hard" },
+] as const;
 
 interface EditRecipeFormProps {
     recipeId: string;
@@ -19,7 +24,7 @@ interface EditRecipeFormProps {
         prepTime?: number;
         cookTime?: number;
         servings: number;
-        difficulty: Difficulty;
+        difficulty: string;
         ingredients: { name: string; amount: string; isOptional: boolean }[];
         steps: { content: string; imageUrl: string }[];
     };
@@ -34,10 +39,12 @@ export function EditRecipeForm({ recipeId, initialData }: EditRecipeFormProps) {
     const [title, setTitle] = useState(initialData.title);
     const [description, setDescription] = useState(initialData.description);
     const [imageUrl, setImageUrl] = useState(initialData.imageUrl);
+    const [imageFile, setImageFile] = useState<File | null>(null);
     const [prepTime, setPrepTime] = useState<number | undefined>(initialData.prepTime);
     const [cookTime, setCookTime] = useState<number | undefined>(initialData.cookTime);
     const [servings, setServings] = useState(initialData.servings);
-    const [difficulty, setDifficulty] = useState<Difficulty>(initialData.difficulty);
+    const [difficulty, setDifficulty] = useState(initialData.difficulty);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const [ingredients, setIngredients] = useState(
         initialData.ingredients.length > 0
@@ -88,6 +95,16 @@ export function EditRecipeForm({ recipeId, initialData }: EditRecipeFormProps) {
         setSteps(updated);
     };
 
+    // Handle file selection
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setImageFile(file);
+            const url = URL.createObjectURL(file);
+            setImageUrl(url);
+        }
+    };
+
     // Form submission
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -95,14 +112,34 @@ export function EditRecipeForm({ recipeId, initialData }: EditRecipeFormProps) {
         setError(null);
 
         try {
+            // Upload image file first if selected
+            let finalImageUrl = imageUrl;
+
+            if (imageFile) {
+                try {
+                    const formData = new FormData();
+                    formData.append("file", imageFile);
+                    const uploadRes = await fetch("/api/upload", {
+                        method: "POST",
+                        body: formData,
+                    });
+                    if (uploadRes.ok) {
+                        const data = await uploadRes.json();
+                        finalImageUrl = data.url;
+                    }
+                } catch {
+                    console.warn("Image upload failed, keeping existing image");
+                }
+            }
+
             const result = await updateRecipe(recipeId, {
                 title,
                 description,
-                imageUrl: imageUrl || undefined,
+                imageUrl: finalImageUrl || undefined,
                 prepTime,
                 cookTime,
                 servings,
-                difficulty,
+                difficulty: difficulty as any,
                 ingredients: ingredients.filter((ing) => ing.name && ing.amount),
                 steps: steps.filter((step) => step.content),
             });
@@ -182,25 +219,35 @@ export function EditRecipeForm({ recipeId, initialData }: EditRecipeFormProps) {
                                 variant="destructive"
                                 size="sm"
                                 className="absolute top-2 right-2"
-                                onClick={() => setImageUrl("")}
+                                onClick={() => {
+                                    setImageUrl("");
+                                    setImageFile(null);
+                                }}
                             >
                                 Remove
                             </Button>
                         </div>
                     ) : (
-                        <div className="border-2 border-dashed rounded-lg p-8 text-center">
-                            <ImageIcon className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                            <UploadButton
-                                endpoint="recipeImage"
-                                onClientUploadComplete={(res) => {
-                                    if (res?.[0]?.url) {
-                                        setImageUrl(res[0].url);
-                                    }
-                                }}
-                                onUploadError={(error: Error) => {
-                                    setError(`Upload failed: ${error.message}`);
-                                }}
+                        <div className="border-2 border-dashed rounded-lg p-8 text-center space-y-4">
+                            <ImageIcon className="w-12 h-12 mx-auto text-muted-foreground" />
+                            <p className="text-sm text-muted-foreground">
+                                Upload a photo of your dish
+                            </p>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={handleFileSelect}
                             />
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                <Upload className="w-4 h-4 mr-2" />
+                                Choose Photo
+                            </Button>
                         </div>
                     )}
                 </div>
@@ -259,12 +306,14 @@ export function EditRecipeForm({ recipeId, initialData }: EditRecipeFormProps) {
                     <select
                         id="difficulty"
                         value={difficulty}
-                        onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+                        onChange={(e) => setDifficulty(e.target.value)}
                         className="w-full px-3 py-2 border rounded-md"
                     >
-                        <option value={Difficulty.EASY}>Easy</option>
-                        <option value={Difficulty.MEDIUM}>Medium</option>
-                        <option value={Difficulty.HARD}>Hard</option>
+                        {DIFFICULTY_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                            </option>
+                        ))}
                     </select>
                 </div>
             </div>

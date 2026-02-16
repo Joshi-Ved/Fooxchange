@@ -1,29 +1,28 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
+import { NextResponse } from 'next/server'
 
 // Define public routes that don't require authentication
 const isPublicRoute = createRouteMatcher([
     '/',
     '/sign-in(.*)',
     '/sign-up(.*)',
-    '/recipes', // Main recipes browse page
-    '/recipes/:id', // Individual recipe viewing (using path-to-regexp syntax)
-    '/api/health', // Health check for ALB/monitoring
-    '/api/uploadthing(.*)', // Public upload endpoint
+    '/recipes',            // Main recipes browse page
+    '/recipes/create',     // Recipe creation page (auth checked in server action)
+    '/recipes/:id',        // Individual recipe viewing
+    '/api/health',         // Health check for ALB/monitoring
+    '/api/uploadthing(.*)', // Upload endpoint (has its own auth)
+    '/api/recipes/sync',   // Background sync endpoint (has its own auth)
 ])
 
 export default clerkMiddleware(async (auth, request) => {
-    const url = new URL(request.url);
-
-    // Protect recipe creation - require authentication
-    if (url.pathname === '/recipes/create') {
-        await auth.protect();
+    // Allow public routes through without auth
+    if (isPublicRoute(request)) {
         return;
     }
 
-    // Protect all other non-public routes
-    if (!isPublicRoute(request)) {
-        await auth.protect()
-    }
+    // For all other routes, require authentication
+    // auth.protect() will redirect to the sign-in page
+    await auth.protect()
 })
 
 export const config = {
@@ -34,3 +33,4 @@ export const config = {
         '/(api|trpc)(.*)',
     ],
 }
+
