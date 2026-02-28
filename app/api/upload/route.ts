@@ -3,6 +3,31 @@ import { auth } from "@clerk/nextjs/server";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import {
+    checkRateLimit,
+    RateLimitPresets,
+    getClientIdentifier,
+    rateLimitExceededResponse,
+} from "@/lib/middleware/rate-limit";
+
+// Magic byte signatures for allowed image types
+const MAGIC_BYTES: Record<string, number[][]> = {
+    "image/jpeg": [[0xff, 0xd8, 0xff]],
+    "image/png": [[0x89, 0x50, 0x4e, 0x47]],
+    "image/webp": [[0x52, 0x49, 0x46, 0x46]], // RIFF header
+    "image/gif": [
+        [0x47, 0x49, 0x46, 0x38, 0x37, 0x61], // GIF87a
+        [0x47, 0x49, 0x46, 0x38, 0x39, 0x61], // GIF89a
+    ],
+};
+
+function validateMagicBytes(buffer: Buffer, mimeType: string): boolean {
+    const signatures = MAGIC_BYTES[mimeType];
+    if (!signatures) return false;
+    return signatures.some((sig) =>
+        sig.every((byte, i) => buffer[i] === byte)
+    );
+}
 
 /**
  * POST /api/upload — Simple file upload endpoint
@@ -11,8 +36,24 @@ import { randomUUID } from "crypto";
  */
 export async function POST(req: NextRequest) {
     try {
-        // Check authentication (optional for now)
+        // 1. Authentication required
         const { userId } = await auth();
+        if (!userId) {
+            return NextResponse.json(
+                { error: "Authentication required" },
+                { status: 401 }
+            );
+        }
+
+        // 2. Rate limiting (10 uploads per minute)
+        const identifier = getClientIdentifier(req, userId);
+        const rateLimit = await checkRateLimit(identifier, {
+            maxRequests: 10,
+            windowSeconds: 60,
+        });
+        if (!rateLimit.success) {
+            return rateLimitExceededResponse(rateLimit) as unknown as NextResponse;
+        }
 
         const formData = await req.formData();
         const file = formData.get("file") as File | null;
@@ -24,7 +65,7 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // Validate file type
+        // 3. Validate file type (client-supplied MIME)
         const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
         if (!allowedTypes.includes(file.type)) {
             return NextResponse.json(
@@ -33,7 +74,7 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // Validate file size (max 5MB)
+        // 4. Validate file size (max 5MB)
         const maxSize = 5 * 1024 * 1024;
         if (file.size > maxSize) {
             return NextResponse.json(
@@ -42,17 +83,32 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // Generate unique filename
-        const ext = file.name.split(".").pop() || "jpg";
+        // 5. Read file bytes and validate magic bytes
+        const bytes = await file.arrayBuffer();
+        const buffer = Buffer.from(bytes);
+
+        if (!validateMagicBytes(buffer, file.type)) {
+            return NextResponse.json(
+                { error: "File content does not match its declared type." },
+                { status: 400 }
+            );
+        }
+
+        // 6. Generate unique filename (use only the validated extension)
+        const extMap: Record<string, string> = {
+            "image/jpeg": "jpg",
+            "image/png": "png",
+            "image/webp": "webp",
+            "image/gif": "gif",
+        };
+        const ext = extMap[file.type] || "jpg";
         const filename = `${randomUUID()}.${ext}`;
 
-        // Ensure uploads directory exists
+        // 7. Ensure uploads directory exists
         const uploadsDir = join(process.cwd(), "public", "uploads");
         await mkdir(uploadsDir, { recursive: true });
 
-        // Write file to disk
-        const bytes = await file.arrayBuffer();
-        const buffer = Buffer.from(bytes);
+        // 8. Write file to disk
         const filepath = join(uploadsDir, filename);
         await writeFile(filepath, buffer);
 

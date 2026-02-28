@@ -1,6 +1,6 @@
 # ============================================================
 # Fooxchange - Multi-stage Production Dockerfile
-# Optimized for AWS ECS/Fargate, App Runner, Elastic Beanstalk
+# Optimized for local and containerized production runs
 # ============================================================
 
 # Stage 1: Install dependencies
@@ -60,7 +60,7 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/prisma ./prisma
 
-# Healthcheck for ECS/ALB
+# Healthcheck endpoint probe
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:3000/api/health || exit 1
 

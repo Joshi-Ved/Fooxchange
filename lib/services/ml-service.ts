@@ -9,6 +9,7 @@
 
 import { db } from '@/lib/db';
 import { generateEmbedding, cosineSimilarity } from './embedding-service';
+import { deriveRecipeTags } from '@/lib/utils/recipe-tags';
 
 export interface UserPreferences {
     dietaryRestrictions?: string[];
@@ -171,16 +172,19 @@ async function applyIntelligentFiltering(
             }
 
             // Filter by dietary restrictions
-            if (preferences.dietaryRestrictions) {
-                // Check if recipe tags include dietary restrictions
-                const recipeTags = r.recipe.tags || [];
+            if (preferences.dietaryRestrictions && preferences.dietaryRestrictions.length > 0) {
+                // Derive tags from ingredient names since Recipe model has no tags column
+                const ingredientNames = (r.recipe.ingredients || []).map(
+                    (ri: any) => ri.ingredient?.name || ri.name || ''
+                );
+                const recipeTags = deriveRecipeTags(ingredientNames);
                 const hasRestrictionViolation = preferences.dietaryRestrictions.some(
                     (restriction) => {
                         if (restriction === 'vegetarian' && recipeTags.includes('meat')) {
                             return true;
                         }
                         if (restriction === 'vegan' &&
-                            (recipeTags.includes('dairy') || recipeTags.includes('eggs'))) {
+                            (recipeTags.includes('dairy') || recipeTags.includes('egg'))) {
                             return true;
                         }
                         return false;
@@ -220,15 +224,22 @@ async function categorizeRecommendations(
         if (totalTime <= 30) {
             category = 'quick';
             reason = `Quick ${totalTime}-minute meal perfect for busy days`;
-        } else if (recipe.tags?.includes('healthy') || recipe.tags?.includes('light')) {
-            category = 'healthy';
-            reason = 'Nutritious and balanced meal';
-        } else if (recipe.difficulty === 'hard' || recipe.tags?.includes('gourmet')) {
+        } else if (recipe.difficulty === 'HARD') {
             category = 'gourmet';
             reason = 'Impressive gourmet dish to showcase your skills';
         } else {
-            category = 'comfort';
-            reason = 'Comforting and satisfying meal';
+            // Derive tags from ingredients to classify
+            const ingredientNames = (recipe.ingredients || []).map(
+                (ri: any) => ri.ingredient?.name || ri.name || ''
+            );
+            const tags = deriveRecipeTags(ingredientNames);
+            if (tags.includes('vegetarian') || tags.includes('vegan')) {
+                category = 'healthy';
+                reason = 'Nutritious and balanced meal';
+            } else {
+                category = 'comfort';
+                reason = 'Comforting and satisfying meal';
+            }
         }
 
         recommendations.push({
@@ -272,19 +283,19 @@ export function predictCookingDifficulty(recipe: any): {
     }
 
     // Factor 3: Number of steps
-    const steps = recipe.instructions?.length || 0;
-    if (steps > 10) {
+    const stepCount = recipe.steps?.length || 0;
+    if (stepCount > 10) {
         difficultyScore += 2;
         factors.push('Multiple cooking steps');
-    } else if (steps > 6) {
+    } else if (stepCount > 6) {
         difficultyScore += 1;
     }
 
     // Factor 4: Technique keywords
-    const instructions = (recipe.instructions || []).join(' ').toLowerCase();
+    const allStepText = (recipe.steps || []).map((s: any) => s.content || '').join(' ').toLowerCase();
     const advancedTechniques = ['sous vide', 'flambe', 'confit', 'braise', 'reduction'];
     const foundTechniques = advancedTechniques.filter((tech) =>
-        instructions.includes(tech)
+        allStepText.includes(tech)
     );
     if (foundTechniques.length > 0) {
         difficultyScore += foundTechniques.length;

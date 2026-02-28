@@ -3,6 +3,7 @@ import { getRecipeById, isRecipeSaved } from "@/lib/actions/detail-actions";
 import { CookMode } from "@/components/recipes/cook-mode";
 import { SaveRecipeButton } from "@/components/recipes/save-recipe-button";
 import { RecipeActions } from "@/components/recipes/recipe-actions";
+import { ShareButton } from "@/components/recipes/share-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -10,7 +11,6 @@ import {
     Users,
     ChefHat,
     ArrowLeft,
-    Share2,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -156,10 +156,10 @@ export default async function RecipeDetailPage({
                                     initialSaved={isSaved}
                                     initialCount={recipe._count.savedBy}
                                 />
-                                <Button variant="outline" className="gap-2 rounded-full">
-                                    <Share2 className="h-5 w-5" />
-                                    Share
-                                </Button>
+                                <ShareButton
+                                    title={recipe.title}
+                                    description={recipe.description}
+                                />
                                 {isAuthor && (
                                     <RecipeActions recipeId={recipe.id} />
                                 )}

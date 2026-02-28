@@ -1,10 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Search, X } from "lucide-react";
+import { Search, X, Camera } from "lucide-react";
+
+// Lazy-load heavy CameraScanner component (MED-25)
+const CameraScanner = lazy(() =>
+    import("@/components/camera-scanner").then((m) => ({ default: m.CameraScanner }))
+);
 
 interface IngredientSearchProps {
     onSearch: (ingredients: string[]) => void;
@@ -13,6 +18,7 @@ interface IngredientSearchProps {
 export function IngredientSearch({ onSearch }: IngredientSearchProps) {
     const [inputValue, setInputValue] = useState("");
     const [selectedIngredients, setSelectedIngredients] = useState<string[]>([]);
+    const [showScanner, setShowScanner] = useState(false);
 
     const handleAddIngredient = () => {
         const trimmed = inputValue.trim();
@@ -60,8 +66,20 @@ export function IngredientSearch({ onSearch }: IngredientSearchProps) {
         }
     };
 
+    const handleScannerDetected = (detected: Array<{ name: string }>) => {
+        const detectedNames = detected
+            .map((item) => item.name.toLowerCase().trim())
+            .filter(Boolean);
+
+        const merged = Array.from(new Set([...selectedIngredients, ...detectedNames]));
+        setSelectedIngredients(merged);
+        onSearch(merged);
+        setShowScanner(false);
+    };
+
     return (
-        <div className="space-y-4">
+        <>
+            <div className="space-y-4">
             {/* Search Input */}
             <div className="flex gap-3">
                 <div className="relative flex-1">
@@ -77,6 +95,10 @@ export function IngredientSearch({ onSearch }: IngredientSearchProps) {
                 </div>
                 <Button onClick={handleAddIngredient} disabled={!inputValue.trim()}>
                     Add
+                </Button>
+                <Button variant="secondary" onClick={() => setShowScanner(true)}>
+                    <Camera className="mr-2 h-4 w-4" />
+                    Scan Ingredients (Edge AI)
                 </Button>
             </div>
 
@@ -132,6 +154,23 @@ export function IngredientSearch({ onSearch }: IngredientSearchProps) {
                     </div>
                 </div>
             )}
-        </div>
+            </div>
+
+            {showScanner && (
+                <Suspense fallback={
+                    <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+                        <div className="text-white text-center">
+                            <div className="animate-spin w-8 h-8 border-2 border-white border-t-transparent rounded-full mx-auto mb-4" />
+                            <p>Loading camera scanner...</p>
+                        </div>
+                    </div>
+                }>
+                    <CameraScanner
+                        onIngredientsDetected={handleScannerDetected}
+                        onClose={() => setShowScanner(false)}
+                    />
+                </Suspense>
+            )}
+        </>
     );
 }

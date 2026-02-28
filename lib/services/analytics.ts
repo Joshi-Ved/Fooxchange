@@ -177,6 +177,13 @@ export class PerformanceMonitor {
 
 /**
  * Daily metrics aggregation (run via cron job)
+ * 
+ * NOTE: No AIMetric/UserEvent table exists in the database schema yet.
+ * This returns zeros until a metrics table is added and populated.
+ * To implement fully:
+ * 1. Add AIMetric model to prisma/schema.prisma
+ * 2. Persist metrics in trackAIMetric() above
+ * 3. Query the table here with date filters
  */
 export async function aggregateDailyMetrics(): Promise<{
     visionScans: number;
@@ -185,8 +192,7 @@ export async function aggregateDailyMetrics(): Promise<{
     avgLatency: number;
     errorRate: number;
 }> {
-    // This would query the database/analytics service
-    // For now, return mock data
+    // No metrics table in schema — return zeros
     return {
         visionScans: 0,
         searches: 0,

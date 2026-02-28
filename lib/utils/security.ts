@@ -5,15 +5,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 /**
- * Sanitize user input to prevent XSS attacks
+ * Sanitize user input to prevent XSS attacks.
+ * Note: Does NOT escape / since it breaks URLs and is not an XSS vector in text content.
  */
 export function sanitizeInput(input: string): string {
     return input
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#x27;')
-        .replace(/\//g, '&#x2F;');
+        .replace(/'/g, '&#x27;');
 }
 
 /**
@@ -68,9 +68,21 @@ export function addSecurityHeaders(response: NextResponse): NextResponse {
     headers.set('X-XSS-Protection', '1; mode=block');
 
     // Content Security Policy
+    // Next.js requires 'unsafe-inline' for styles (CSS-in-JS).
+    // TensorFlow.js/Transformers.js needs 'wasm-unsafe-eval' for WebAssembly.
+    // Clerk auth needs connect-src to its domains.
     headers.set(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:;"
+        [
+            "default-src 'self'",
+            "script-src 'self' 'wasm-unsafe-eval'",
+            "style-src 'self' 'unsafe-inline'",  // Required by Next.js CSS-in-JS
+            "img-src 'self' data: https: blob:",
+            "font-src 'self' data:",
+            "connect-src 'self' https://*.clerk.dev https://*.clerk.com https://*.uploadthing.com",
+            "worker-src 'self' blob:",
+            "frame-src 'self'",
+        ].join('; ')
     );
 
     // Referrer Policy
@@ -104,8 +116,9 @@ export function validateAPIKey(key: string | undefined, name: string): {
 
 /**
  * Extract user ID from request (works with or without auth)
+ * Returns null if no user ID is found — callers should return 401.
  */
-export function getUserIdFromRequest(request: NextRequest): string {
+export function getUserIdFromRequest(request: NextRequest): string | null {
     // Try to get from auth session (would be set by middleware)
     const userId = request.headers.get('x-user-id');
 
@@ -113,8 +126,7 @@ export function getUserIdFromRequest(request: NextRequest): string {
         return userId;
     }
 
-    // Fallback to demo user (for testing)
-    return 'demo-user';
+    return null;
 }
 
 /**
@@ -125,15 +137,24 @@ export function configureCORS(request: NextRequest): {
     'Access-Control-Allow-Methods': string;
     'Access-Control-Allow-Headers': string;
 } {
-    const origin = request.headers.get('origin') || '*';
+    const origin = request.headers.get('origin') || '';
 
     // In production, whitelist specific domains
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['*'];
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
 
-    const isAllowed = allowedOrigins.includes('*') || allowedOrigins.includes(origin);
+    // If wildcard is configured, allow any origin but don't reflect — just send *
+    if (allowedOrigins.includes('*')) {
+        return {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        };
+    }
+
+    const isAllowed = allowedOrigins.includes(origin);
 
     return {
-        'Access-Control-Allow-Origin': isAllowed ? origin : allowedOrigins[0],
+        'Access-Control-Allow-Origin': isAllowed ? origin : (allowedOrigins[0] || ''),
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };

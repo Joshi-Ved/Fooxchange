@@ -6,14 +6,18 @@ import { z } from "zod";
  */
 
 // Vision API - Image identification
+// z.instanceof(File) doesn't work in Node.js server context (MED-40).
+// Use z.any() with manual refinements for cross-environment compatibility.
 export const identifyImageSchema = z.object({
-    image: z.instanceof(File).refine(
-        (file) => file.size <= 2 * 1024 * 1024,
-        "Image must be less than 2MB"
-    ).refine(
-        (file) => ['image/jpeg', 'image/png', 'image/webp'].includes(file.type),
-        "Only JPEG, PNG, and WebP images are allowed"
-    ),
+    image: z.any()
+        .refine(
+            (file) => file && typeof file.size === 'number' && file.size <= 2 * 1024 * 1024,
+            "Image must be less than 2MB"
+        )
+        .refine(
+            (file) => file && typeof file.type === 'string' && ['image/jpeg', 'image/png', 'image/webp'].includes(file.type),
+            "Only JPEG, PNG, and WebP images are allowed"
+        ),
 });
 
 // AI Recommendations

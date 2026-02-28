@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChefHat, Check } from "lucide-react";
@@ -35,6 +35,22 @@ export function CookMode({ steps, recipeName }: CookModeProps) {
         }
     };
 
+    const handleExit = useCallback(() => {
+        setIsActive(false);
+        setCompletedSteps(new Set());
+        setCurrentStep(0);
+    }, []);
+
+    // Escape key handler for accessibility
+    useEffect(() => {
+        if (!isActive) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') handleExit();
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [isActive, handleExit]);
+
     if (!isActive) {
         return (
             <Button
@@ -49,7 +65,12 @@ export function CookMode({ steps, recipeName }: CookModeProps) {
     }
 
     return (
-        <div className="fixed inset-0 z-50 flex flex-col bg-background">
+        <div
+            className="fixed inset-0 z-50 flex flex-col bg-background"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Cook Mode: ${recipeName}`}
+        >
             {/* Header */}
             <div className="border-b bg-background/80 backdrop-blur-sm">
                 <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-4">
@@ -57,7 +78,7 @@ export function CookMode({ steps, recipeName }: CookModeProps) {
                         <h2 className="text-xl font-bold">Cook Mode</h2>
                         <p className="text-sm text-muted-foreground">{recipeName}</p>
                     </div>
-                    <Button variant="outline" onClick={() => setIsActive(false)}>
+                    <Button variant="outline" onClick={handleExit}>
                         Exit
                     </Button>
                 </div>
@@ -175,11 +196,7 @@ export function CookMode({ steps, recipeName }: CookModeProps) {
                                 </p>
                                 <Button
                                     className="mt-4"
-                                    onClick={() => {
-                                        setIsActive(false);
-                                        setCompletedSteps(new Set());
-                                        setCurrentStep(0);
-                                    }}
+                                    onClick={handleExit}
                                 >
                                     Exit Cook Mode
                                 </Button>

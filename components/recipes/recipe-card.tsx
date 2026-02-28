@@ -92,22 +92,21 @@ export function RecipeCard({ recipe, onSave, isSaved = false }: RecipeCardProps)
                                 {recipe.difficulty.toLowerCase()}
                             </span>
                         </div>
-                        <div className="flex items-center gap-2">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className={`gap-1 ${isSaved ? "text-rose-500" : "text-muted-foreground hover:text-rose-500"}`}
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    onSave?.(recipe.id);
-                                }}
-                            >
-                                <Heart className={`h-4 w-4 ${isSaved ? "fill-current" : ""}`} />
-                                {recipe._count.savedBy}
-                            </Button>
-                        </div>
                     </div>
                 </Link>
+
+                {/* Save button outside Link to avoid nested interactive elements */}
+                <div className="mt-2 flex justify-end">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className={`gap-1 ${isSaved ? "text-rose-500" : "text-muted-foreground hover:text-rose-500"}`}
+                        onClick={() => onSave?.(recipe.id)}
+                    >
+                        <Heart className={`h-4 w-4 ${isSaved ? "fill-current" : ""}`} />
+                        {recipe._count.savedBy}
+                    </Button>
+                </div>
             </CardContent>
         </Card>
     );

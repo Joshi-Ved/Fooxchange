@@ -8,6 +8,7 @@ import { ChefHat, Plus, Search } from "lucide-react";
 
 export function Navbar() {
     const pathname = usePathname();
+    const authEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
     const isActive = (path: string) => {
         return pathname === path;
@@ -44,6 +45,11 @@ export function Navbar() {
 
                 {/* Auth Buttons */}
                 <div className="flex items-center gap-3">
+                    {!authEnabled ? (
+                        /* When auth is not configured, don't show auth links (MED-28) */
+                        <span className="text-xs text-muted-foreground">Auth not configured</span>
+                    ) : (
+                        <>
                     {/* Signed Out State */}
                     <SignedOut>
                         <Link href="/sign-in">
@@ -74,7 +80,6 @@ export function Navbar() {
                             </Button>
                         </Link>
                         <UserButton
-                            afterSignOutUrl="/"
                             appearance={{
                                 elements: {
                                     avatarBox: "h-9 w-9"
@@ -82,6 +87,8 @@ export function Navbar() {
                             }}
                         />
                     </SignedIn>
+                        </>
+                    )}
                 </div>
             </div>
 

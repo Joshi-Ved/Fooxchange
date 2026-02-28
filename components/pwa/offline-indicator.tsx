@@ -27,12 +27,13 @@ export function OfflineIndicator() {
 export function OnlineIndicator({ showOnlineMessage = true }: { showOnlineMessage?: boolean }) {
     const { isOnline } = usePWA();
 
-    if (!showOnlineMessage || isOnline) {
+    // Only show when user has come back online
+    if (!showOnlineMessage || !isOnline) {
         return null;
     }
 
     return (
-        <div className="fixed bottom-0 left-0 right-0 z-50 animate-slide-up">
+        <div className="fixed bottom-0 left-0 right-0 z-40 animate-slide-up">
             <div className="bg-green-500 text-white py-2 px-4 text-center text-sm font-medium flex items-center justify-center gap-2">
                 <Wifi className="w-4 h-4" />
                 <span>You're back online!</span>

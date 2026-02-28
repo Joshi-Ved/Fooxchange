@@ -8,6 +8,7 @@ import {
 } from "@/lib/actions/feed-actions";
 import { RecipeCard } from "@/components/recipes/recipe-card";
 import { IngredientSearch } from "@/components/recipes/ingredient-search";
+import { AIRecommendations } from "@/components/ai-recommendations";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Plus, Loader2 } from "lucide-react";
@@ -17,20 +18,25 @@ export default function RecipesPage() {
     const [recipes, setRecipes] = useState<RecipeCardType[]>([]);
     const [loading, setLoading] = useState(true);
     const [searching, setSearching] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [selectedIngredients, setSelectedIngredients] = useState<string[]>([]);
 
     // Load initial recipes
     useEffect(() => {
+        const controller = new AbortController();
         loadRecipes();
+        return () => controller.abort();
     }, []);
 
     const loadRecipes = async () => {
         try {
             setLoading(true);
+            setError(null);
             const data = await getRecipes({ limit: 12 });
             setRecipes(data);
-        } catch (error) {
-            console.error("Error loading recipes:", error);
+        } catch (err) {
+            console.error("Error loading recipes:", err);
+            setError("Failed to load recipes. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -47,10 +53,12 @@ export default function RecipesPage() {
 
         try {
             setSearching(true);
+            setError(null);
             const data = await searchRecipesByIngredients(ingredients);
             setRecipes(data);
-        } catch (error) {
-            console.error("Error searching recipes:", error);
+        } catch (err) {
+            console.error("Error searching recipes:", err);
+            setError("Search failed. Please try again.");
         } finally {
             setSearching(false);
         }
@@ -87,8 +95,34 @@ export default function RecipesPage() {
                     </CardContent>
                 </Card>
 
+                <div className="mt-8">
+                    <AIRecommendations ingredients={selectedIngredients} />
+                </div>
+
                 {/* Results */}
-                {searching || loading ? (
+                {error ? (
+                    <div className="mt-12 text-center">
+                        <div className="mx-auto max-w-md">
+                            <div className="mb-4 text-6xl">⚠️</div>
+                            <h3 className="text-xl font-semibold text-destructive">
+                                Something went wrong
+                            </h3>
+                            <p className="mt-2 text-muted-foreground">{error}</p>
+                            <Button
+                                className="mt-6 gap-2 rounded-full"
+                                onClick={() => {
+                                    if (selectedIngredients.length > 0) {
+                                        handleSearch(selectedIngredients);
+                                    } else {
+                                        loadRecipes();
+                                    }
+                                }}
+                            >
+                                Try Again
+                            </Button>
+                        </div>
+                    </div>
+                ) : searching || loading ? (
                     <div className="mt-12 flex justify-center">
                         <div className="text-center">
                             <Loader2 className="mx-auto h-8 w-8 animate-spin text-muted-foreground" />

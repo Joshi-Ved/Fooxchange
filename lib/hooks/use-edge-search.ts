@@ -195,6 +195,7 @@ export function useEdgeSearch(options: UseEdgeSearchOptions = {}) {
 
     /**
      * Calculate cosine similarity between two embeddings
+     * Returns 0 for degenerate inputs (zero vectors) instead of NaN
      */
     const cosineSimilarity = useCallback(
         (embedding1: number[], embedding2: number[]): number => {
@@ -212,7 +213,13 @@ export function useEdgeSearch(options: UseEdgeSearchOptions = {}) {
                 norm2 += embedding2[i] * embedding2[i];
             }
 
-            return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
+            const denominator = Math.sqrt(norm1) * Math.sqrt(norm2);
+            if (denominator === 0) return 0;
+
+            const similarity = dotProduct / denominator;
+            // Guard against NaN/Infinity from floating-point edge cases
+            if (!Number.isFinite(similarity)) return 0;
+            return similarity;
         },
         []
     );

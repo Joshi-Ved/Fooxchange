@@ -85,6 +85,10 @@ export function CreateRecipeForm() {
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
+            // Revoke previous blob URL to avoid memory leak (MED-18)
+            if (imageUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(imageUrl);
+            }
             setImageFile(file);
             const url = URL.createObjectURL(file);
             setImageUrl(url);
@@ -225,6 +229,9 @@ export function CreateRecipeForm() {
                                     size="sm"
                                     className="absolute top-2 right-2"
                                     onClick={() => {
+                                        if (imageUrl.startsWith('blob:')) {
+                                            URL.revokeObjectURL(imageUrl);
+                                        }
                                         setImageUrl("");
                                         setImageFile(null);
                                     }}
@@ -300,7 +307,10 @@ export function CreateRecipeForm() {
                             id="servings"
                             type="number"
                             value={servings}
-                            onChange={(e) => setServings(Number(e.target.value))}
+                            onChange={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                setServings(Number.isNaN(val) || val < 1 ? 1 : val);
+                            }}
                             min={1}
                             required
                         />

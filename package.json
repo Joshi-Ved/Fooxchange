@@ -15,7 +15,11 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "type-check": "tsc --noEmit",
-    "build:model-hashes": "ts-node scripts/generate-model-hashes.ts"
+    "build:model-hashes": "ts-node scripts/generate-model-hashes.ts",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
+    "db:seed": "node scripts/seed-indian-recipes.js"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.37.1",

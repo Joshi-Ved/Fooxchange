@@ -11,18 +11,31 @@ interface RateLimitEntry {
     resetAt: number;
 }
 
-// In-memory store (use Redis in production for multi-instance deployments)
+/**
+ * WARNING: In-memory store — NOT suitable for multi-instance production deployments.
+ * For production with multiple servers/containers, replace with Redis (Upstash/Vercel KV).
+ * This store is per-process and will reset on each deployment or restart.
+ */
 const rateLimitStore = new Map<string, RateLimitEntry>();
 
-// Clean up expired entries every 5 minutes
-setInterval(() => {
+/**
+ * Cleanup expired entries lazily during rate-limit checks.
+ * Avoids top-level setInterval which leaks timers during testing
+ * and in serverless environments.
+ */
+let lastCleanup = Date.now();
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+function cleanupExpired(): void {
     const now = Date.now();
+    if (now - lastCleanup < CLEANUP_INTERVAL_MS) return;
+    lastCleanup = now;
     for (const [key, value] of rateLimitStore.entries()) {
         if (value.resetAt < now) {
             rateLimitStore.delete(key);
         }
     }
-}, 5 * 60 * 1000);
+}
 
 export interface RateLimitConfig {
     /**
@@ -58,6 +71,9 @@ export async function checkRateLimit(
     identifier: string,
     config: RateLimitConfig
 ): Promise<RateLimitResult> {
+    // Lazy cleanup of expired entries
+    cleanupExpired();
+
     const now = Date.now();
     const windowMs = config.windowSeconds * 1000;
 
@@ -160,7 +176,8 @@ export function getClientIdentifier(request: Request, userId?: string | null): s
 
     // Basic IP validation to prevent header injection
     const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
-    const ipv6Regex = /^([0-9a-f]{1,4}:){7}[0-9a-f]{1,4}$/i;
+    // Accepts full, compressed (::1), and mixed IPv6 formats (MED-41)
+    const ipv6Regex = /^([0-9a-f]{0,4}:){1,7}[0-9a-f]{0,4}$/i;
 
     if (rawIp !== 'unknown' && !ipv4Regex.test(rawIp) && !ipv6Regex.test(rawIp)) {
         console.warn(`[Security] Invalid IP format detected: ${rawIp}`);

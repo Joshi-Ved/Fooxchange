@@ -54,12 +54,13 @@ export async function GET(req: NextRequest) {
         });
 
         // 4. Perform search with timeout
+        let searchTimeoutId: ReturnType<typeof setTimeout>;
         const results = await Promise.race([
             searchRecipesBySemantic(validatedData.query, validatedData.limit, threshold),
-            new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Search timeout')), 10000)
-            )
-        ]);
+            new Promise<never>((_, reject) => {
+                searchTimeoutId = setTimeout(() => reject(new Error('Search timeout')), 10000);
+            })
+        ]).finally(() => clearTimeout(searchTimeoutId!));
 
         return successResponse({
             query: validatedData.query,

@@ -1,13 +1,311 @@
-# 🍳 Fooxchange - Zero-Cost AI Recipe Sharing Platform
+# 🍳 Fooxchange — AI-Powered Food Exchange Platform
 
-A modern, **Edge AI-powered** Progressive Web App built with Next.js. Uses client-side TensorFlow.js and Transformers.js for **$0 AI costs** and privacy-first architecture.
+> **Production-grade** Next.js 16 application for community recipe sharing, powered by
+> client-side TensorFlow.js (Edge AI), semantic vector search, and OpenAI embeddings.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16.1.6-black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)
 ![Prisma](https://img.shields.io/badge/Prisma-5.22.0-2D3748)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.0-38B2AC)
 ![PWA](https://img.shields.io/badge/PWA-Ready-brightgreen)
-![Edge AI](https://img.shields.io/badge/Edge_AI-TensorFlow.js-orange)
+![Coverage](https://img.shields.io/badge/Coverage-70%25%2B-success)
+
+---
+
+## Table of Contents
+
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Folder Structure](#folder-structure)
+- [Quick Start](#quick-start)
+- [Environment Variables](#environment-variables)
+- [Database Setup](#database-setup)
+- [Testing](#testing)
+- [Production Deployment Checklist](#production-deployment-checklist)
+- [Key Design Decisions](#key-design-decisions)
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│               Next.js App Router (v16)               │
+│  ┌──────────┐  ┌──────────┐  ┌────────────────────┐ │
+│  │  /app/   │  │/components│  │  /app/api/**       │ │
+│  │  Pages   │  │  (UI)    │  │  Route Handlers     │ │
+│  └────┬─────┘  └────┬─────┘  └─────────┬──────────┘ │
+│       │              │                  │            │
+│  ┌────▼──────────────▼──────────────────▼──────────┐ │
+│  │                 lib/                             │ │
+│  │  ┌────────┐  ┌────────┐  ┌────────┐  ┌───────┐  │ │
+│  │  │ lib/ai │  │ lib/db │  │lib/utils│  │lib/   │  │ │
+│  │  │(AI logic│  │  (repos)│  │(logger) │  │security│ │
+│  │  │singleton│  │ client) │  │ errors) │  │       │  │ │
+│  │  └────────┘  └────────┘  └────────┘  └───────┘  │ │
+│  └──────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────┘
+```
+
+**Layer responsibilities:**
+
+| Layer | Responsibility |
+|---|---|
+| `app/` | Pages, layouts, Next.js route handlers |
+| `components/` | Pure UI components — no AI or DB logic |
+| `lib/ai/` | All AI: model singleton, embeddings, recommendations |
+| `lib/db/` | Prisma client singleton + typed repositories |
+| `lib/utils/` | Logger, error-handling helpers |
+| `lib/security/` | Model integrity, vector validation, secure storage |
+| `lib/middleware/` | Rate limiting, request-id injection |
+| `lib/validations/` | Zod schemas for all API inputs |
+
+---
+
+## Tech Stack
+
+| Concern | Technology |
+|---|---|
+| Framework | Next.js 16 (App Router) |
+| Language | TypeScript 5 (strict) |
+| Database | PostgreSQL via Neon (serverless) |
+| ORM | Prisma 5 |
+| Auth | Clerk |
+| Styling | Tailwind CSS 4 |
+| Object Detection | TensorFlow.js + COCO-SSD (client-side) |
+| Semantic Search | @xenova/transformers (Edge) / OpenAI fallback |
+| File Uploads | UploadThing |
+| Toast Notifications | Sonner |
+| Testing | Jest 30 + Testing Library |
+| Formatting | Prettier 3 |
+| Linting | ESLint 9 + eslint-config-next |
+
+---
+
+## Folder Structure
+
+```
+fooxchange/
+├── app/
+│   ├── api/
+│   │   ├── ai/
+│   │   │   ├── analyze/route.ts      # Recipe AI analysis
+│   │   │   ├── recommend/route.ts    # Personalised recommendations
+│   │   │   ├── search/route.ts       # Semantic recipe search
+│   │   │   ├── trending/route.ts     # Trending recipes
+│   │   │   └── personalized/route.ts
+│   │   ├── __tests__/               # API route integration tests
+│   │   └── health/route.ts
+│   ├── error.tsx                    # Route-level error boundary
+│   ├── global-error.tsx             # Root error boundary
+│   └── layout.tsx
+├── components/
+│   ├── camera-scanner.tsx           # TF.js COCO-SSD ingredient scanner
+│   ├── ui/
+│   │   ├── error-boundary.tsx       # React error boundary class
+│   │   └── toaster.tsx              # Sonner toast provider
+│   └── ...
+├── lib/
+│   ├── ai/                          ← NEW: clean AI layer
+│   │   ├── singleton.ts             # Lazy model loading (one instance)
+│   │   ├── embeddings.ts            # OpenAI / hash-fallback embeddings
+│   │   ├── recommendations.ts       # Scoring, nutrition, difficulty
+│   │   ├── index.ts                 # Barrel export
+│   │   └── __tests__/              # AI unit tests
+│   ├── db/                          ← NEW: repository layer
+│   │   ├── client.ts                # Prisma singleton + slow-query logging
+│   │   ├── repositories/
+│   │   │   ├── recipe.repository.ts
+│   │   │   └── user.repository.ts
+│   │   └── index.ts                 # Barrel export
+│   ├── utils/
+│   │   ├── logger.ts                ← NEW: structured JSON logger
+│   │   └── error-handling.ts
+│   ├── middleware/
+│   │   └── rate-limit.ts
+│   ├── security/
+│   │   ├── model-integrity.ts
+│   │   ├── vector-validation.ts
+│   │   └── secure-storage.ts
+│   └── validations/
+│       └── api-validations.ts       # All Zod schemas
+└── prisma/
+    └── schema.prisma                # Soft-delete + composite indexes
+```
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone and install
+git clone <repo-url>
+cd fooxchange
+npm install
+
+# 2. Set up environment variables (see below)
+cp .env.example .env.local
+
+# 3. Generate Prisma client and push schema
+npx prisma generate
+npx prisma db push
+
+# 4. Start development server
+npm run dev
+```
+
+Visit [http://localhost:3000](http://localhost:3000).
+
+---
+
+## Environment Variables
+
+```env
+# Database (Neon PostgreSQL)
+DATABASE_URL="postgresql://..."
+
+# Clerk Authentication
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_..."
+CLERK_SECRET_KEY="sk_..."
+NEXT_PUBLIC_CLERK_SIGN_IN_URL="/sign-in"
+NEXT_PUBLIC_CLERK_SIGN_UP_URL="/sign-up"
+NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL="/"
+NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL="/"
+
+# UploadThing (file uploads)
+UPLOADTHING_APP_ID="..."
+UPLOADTHING_SECRET="..."
+
+# OpenAI (optional — enables high-quality embeddings)
+# Without this key the system uses the hash-based fallback embedding.
+OPENAI_API_KEY="sk-..."
+
+# CORS (comma-separated allowed origins)
+ALLOWED_ORIGINS="http://localhost:3000"
+```
+
+---
+
+## Database Setup
+
+```bash
+# Generate Prisma client
+npm run db:generate
+
+# Push schema to database (development)
+npm run db:push
+
+# Or run migrations (production)
+npm run db:migrate
+
+# Open Prisma Studio
+npm run db:studio
+```
+
+The schema includes:
+
+- **Soft delete** on `User` and `Recipe` (via `deletedAt` field)
+- **Composite indexes** on `(authorId, deletedAt)` and `(createdAt, deletedAt)` for efficient feed queries
+- **Vector embeddings** stored as JSON text (upgradeable to `pgvector`)
+
+---
+
+## Testing
+
+```bash
+# Run all tests
+npm test
+
+# Watch mode
+npm run test:watch
+
+# Coverage report (enforces ≥ 70 % across lines/functions/branches)
+npm run test:coverage
+```
+
+**Test locations:**
+
+| Suite | Path |
+|---|---|
+| Embedding unit tests | `lib/ai/__tests__/embeddings.test.ts` |
+| Recommendation unit tests | `lib/ai/__tests__/recommendations.test.ts` |
+| API integration tests | `app/api/__tests__/analyze-route.test.ts` |
+| ML Service tests | `lib/services/__tests__/ml-service.test.ts` |
+
+---
+
+## Production Deployment Checklist
+
+### Before deploying
+
+- [ ] All environment variables set in hosting dashboard (never commit secrets)
+- [ ] `OPENAI_API_KEY` configured if you want semantic embeddings
+- [ ] `DATABASE_URL` pointing to production PostgreSQL (connection-pooled)
+- [ ] Run `npm run type-check` — zero TS errors
+- [ ] Run `npm run lint` — zero ESLint errors
+- [ ] Run `npm run test:coverage` — coverage ≥ 70 %
+- [ ] Run `npm run format:check` — code is formatted
+
+### Database
+
+- [ ] Run `prisma migrate deploy` (not `db push`) in production
+- [ ] Enable connection pooling (PgBouncer / Neon pooler)
+- [ ] Set up automated daily backups
+
+### Security
+
+- [ ] Rate limiting configured per route (see `lib/middleware/rate-limit.ts`)
+- [ ] CORS origins restricted (`ALLOWED_ORIGINS`)
+- [ ] Clerk webhook secret validated for user sync
+- [ ] All AI routes require authentication (`auth()` check)
+- [ ] User input sanitised via Zod before reaching DB
+
+### Performance
+
+- [ ] `next build` output reviewed — no unexpected large bundles
+- [ ] TensorFlow.js loaded via dynamic import (code-split from main bundle)
+- [ ] Images served through Next.js `<Image />` with proper `sizes`
+- [ ] Prisma connection pooling verified (singleton pattern in `lib/db/client.ts`)
+
+### Observability
+
+- [ ] Structured logs routed to your logging stack (Datadog / Logtail / ELK)
+- [ ] `ai-error` log level filtered to a dedicated channel / alert
+- [ ] Error tracking (Sentry or similar) wired to `app/error.tsx`
+- [ ] Database slow-query logging enabled (`> 200 ms` threshold)
+
+---
+
+## Key Design Decisions
+
+### Why a model singleton? (`lib/ai/singleton.ts`)
+
+COCO-SSD is ~30 MB. Without a singleton, switching pages could trigger multiple
+downloads. The module-level `_modelPromise` ensures the model loads exactly once
+per browser session, with progress events for UX feedback.
+
+### Why the repository pattern? (`lib/db/repositories/`)
+
+Keeps Prisma query logic out of route handlers and components, making it trivial
+to swap query implementations in tests and reducing duplication.
+
+### Why soft delete?
+
+Permanent deletes are irreversible. With `deletedAt`, we can recover accidentally
+deleted content and maintain referential integrity for analytics data.
+
+### Why structured logging? (`lib/utils/logger.ts`)
+
+JSON log lines are machine-parseable by any log aggregator (Datadog,
+Logtail, ELK, etc.). The separate `ai-error` level lets you create targeted alerts when
+AI calls fail, independently from general application errors.
+
+### TensorFlow on the client, not the server
+
+Running COCO-SSD client-side (WebGL backend) is ~10× faster than server inference
+for real-time camera scanning, keeps costs at $0, and means image data never
+leaves the user's device.
+
 
 ## 🚀 **Quick Start - Test on Your Phone NOW!**
 
@@ -17,9 +315,11 @@ A modern, **Edge AI-powered** Progressive Web App built with Next.js. Uses clien
 # 1. Start the dev server with network access
 npm run dev -- -H 0.0.0.0
 
-# 2. Your local IP: 192.168.0.176
+# 2. Find your local IP (Windows)
+ipconfig
+
 # 3. On your phone (connected to SAME WiFi):
-#    Open browser → http://192.168.0.176:3000
+#    Open browser → http://<YOUR_LOCAL_IP>:3000
 
 # 4. Test the PWA:
 #    - Camera scanning (requires HTTPS in production)

@@ -25,9 +25,10 @@ export async function searchRecipesBySemantic(
         // Generate embedding for the search query
         const queryEmbedding = await generateEmbedding(query);
 
-        // Fetch all recipe embeddings
-        // TODO: Optimize with pgvector when Neon supports it
+        // Fetch recipe embeddings (capped to prevent O(n) full-table scan)
+        // TODO: Migrate to pgvector for true ANN search when Neon supports it
         const recipeEmbeddings = await db.recipeEmbedding.findMany({
+            take: 500,
             include: {
                 recipe: {
                     include: {
@@ -93,8 +94,9 @@ export async function findRecipesByIngredients(
             ingredientNames.map((name) => generateEmbedding(name))
         );
 
-        // Fetch all recipes with their ingredients
+        // Fetch recipes with their ingredients (capped to prevent full-table scan)
         const recipes = await db.recipe.findMany({
+            take: 500,
             include: {
                 ingredients: {
                     include: {
@@ -182,6 +184,7 @@ export async function findSimilarIngredients(
         const queryEmbedding = await generateEmbedding(ingredientName);
 
         const allIngredients = await db.ingredient.findMany({
+            take: 1000,
             include: {
                 ingredientEmbedding: true,
             },

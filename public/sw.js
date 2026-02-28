@@ -79,6 +79,11 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
+    // Never cache authentication endpoints — security sensitive
+    if (url.pathname.startsWith('/api/auth') || url.pathname.startsWith('/sign-in') || url.pathname.startsWith('/sign-up')) {
+        return;
+    }
+
     // Strategy 1: Model files (Cache First - they have integrity checks)
     if (url.pathname.startsWith('/models/')) {
         event.respondWith(cacheFirstStrategy(request, MODEL_CACHE_NAME));
@@ -118,9 +123,16 @@ async function cacheFirstStrategy(request, cacheName) {
         console.log('[SW] Cache miss, fetching:', request.url);
         const response = await fetch(request);
 
-        // Cache successful responses
+        // Cache successful responses, enforce max entries
         if (response.ok) {
-            cache.put(request, response.clone());
+            const clone = response.clone();
+            // Limit cache to ~100 entries per cache bucket
+            cache.keys().then((keys) => {
+                if (keys.length > 100) {
+                    cache.delete(keys[0]); // Evict oldest entry
+                }
+            });
+            cache.put(request, clone);
         }
 
         return response;
@@ -146,9 +158,15 @@ async function networkFirstStrategy(request, cacheName) {
     try {
         const response = await fetch(request);
 
-        // Cache successful GET requests
+        // Cache successful GET requests (with size limit)
         if (response.ok && request.method === 'GET') {
-            cache.put(request, response.clone());
+            const clone = response.clone();
+            cache.keys().then((keys) => {
+                if (keys.length > 50) {
+                    cache.delete(keys[0]);
+                }
+            });
+            cache.put(request, clone);
         }
 
         return response;

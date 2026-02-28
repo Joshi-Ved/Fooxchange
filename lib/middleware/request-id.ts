@@ -31,14 +31,19 @@ export function generateRequestId(): string {
 }
 
 /**
+ * UUID v4 format regex for request ID validation
+ */
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
  * Gets or creates a request ID from headers
- * If client provides x-request-id, reuse it (for request tracing)
- * Otherwise generate a new one
+ * If client provides a valid UUID x-request-id, reuse it (for request tracing)
+ * Otherwise generate a new one. Validates format to prevent log-forging (MED-33).
  */
 export function getRequestId(request: Request): string {
-    // Check if client sent a request ID
+    // Check if client sent a valid request ID
     const existingId = request.headers.get(REQUEST_ID_HEADER);
-    if (existingId) {
+    if (existingId && UUID_REGEX.test(existingId)) {
         return existingId;
     }
 

@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { Recipe, Difficulty } from "@prisma/client";
+import { Difficulty } from "@prisma/client";
 
 export type RecipeCard = {
     id: string;
@@ -159,6 +159,11 @@ export async function searchRecipesByIngredients(
     }
 }
 
+/**
+ * Get the latest recipes, sorted by creation date.
+ * Note: Named "trending" but actually returns newest recipes (MED-37).
+ * True trending would require a metrics/analytics table tracking views/saves over time.
+ */
 export async function getTrendingRecipes(limit = 6): Promise<RecipeCard[]> {
     try {
         const recipes = await db.recipe.findMany({

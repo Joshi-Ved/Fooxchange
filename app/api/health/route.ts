@@ -2,7 +2,7 @@
  * Health Check Endpoint
  * GET /api/health
  * 
- * Used by: AWS ALB target group, ECS container health check, Docker HEALTHCHECK
+ * Used by: local uptime probes, container health checks, and deployment monitors
  * Returns 200 for healthy/degraded (app is running), 503 for down.
  */
 

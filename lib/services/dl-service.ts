@@ -71,6 +71,17 @@ export async function learnUserTasteProfile(userId: string): Promise<UserTastePr
             'curry', 'tabasco', 'red pepper flakes', 'chipotle', 'serrano'
         ]);
 
+        // Cuisine detection from ingredient keywords
+        const cuisineIndicators: Record<string, string[]> = {
+            'Indian': ['paneer', 'turmeric', 'cumin', 'garam masala', 'ghee', 'curry', 'coriander', 'cardamom', 'basmati', 'dal', 'naan', 'tandoori', 'masala'],
+            'Italian': ['pasta', 'basil', 'parmesan', 'mozzarella', 'oregano', 'risotto', 'prosciutto', 'pesto', 'marinara'],
+            'Chinese': ['soy sauce', 'tofu', 'sesame', 'wok', 'hoisin', 'five spice', 'oyster sauce', 'bok choy', 'szechuan'],
+            'Mexican': ['tortilla', 'lime', 'avocado', 'cilantro', 'salsa', 'jalapeno', 'queso', 'chipotle', 'taco'],
+            'Japanese': ['miso', 'nori', 'sake', 'wasabi', 'mirin', 'sushi', 'dashi', 'tempura', 'ramen'],
+            'Thai': ['coconut milk', 'lemongrass', 'fish sauce', 'thai basil', 'galangal', 'kaffir', 'pad thai'],
+            'Mediterranean': ['olive oil', 'feta', 'hummus', 'tahini', 'pita', 'za\'atar', 'couscous'],
+        };
+
         savedRecipes.forEach(({ recipe }) => {
             // Count ingredients
             recipe.ingredients.forEach(({ ingredient }) => {
@@ -83,7 +94,22 @@ export async function learnUserTasteProfile(userId: string): Promise<UserTastePr
                     Array.from(spicyIngredients).some(spicy => ingredientLower.includes(spicy))) {
                     spiceScore++;
                 }
+
+                // Detect cuisine from ingredients (MED-31)
+                for (const [cuisine, indicators] of Object.entries(cuisineIndicators)) {
+                    if (indicators.some(ind => ingredientLower.includes(ind))) {
+                        cuisines.set(cuisine, (cuisines.get(cuisine) || 0) + 1);
+                    }
+                }
             });
+
+            // Also detect cuisine from recipe title
+            const titleLower = recipe.title?.toLowerCase() || '';
+            for (const [cuisine, indicators] of Object.entries(cuisineIndicators)) {
+                if (indicators.some(ind => titleLower.includes(ind))) {
+                    cuisines.set(cuisine, (cuisines.get(cuisine) || 0) + 1);
+                }
+            }
 
             // Track cooking time
             totalCookTime += (recipe.prepTime || 0) + (recipe.cookTime || 0);

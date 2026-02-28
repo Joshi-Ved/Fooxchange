@@ -39,7 +39,7 @@ export function SaveRecipeButton({
                 }
                 if (result.saved !== undefined) {
                     setIsSaved(result.saved);
-                    setCount((prev) => (result.saved ? prev + 1 : prev - 1));
+                    setCount((prev) => Math.max(0, result.saved ? prev + 1 : prev - 1));
                 }
             } catch (error) {
                 console.error("Failed to save recipe:", error);

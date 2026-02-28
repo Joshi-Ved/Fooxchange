@@ -126,23 +126,28 @@ export async function POST(req: NextRequest) {
             return newRecipe;
         });
 
-        // 6. Generate embedding (async, non-blocking)
+        // 6. Generate embedding (background, but don't lose errors silently)
         const ingredientNames = validatedData.ingredients.map((i) => i.name);
-        generateRecipeEmbedding(
-            validatedData.title,
-            validatedData.description,
-            ingredientNames
-        ).then(async (embedding) => {
-            await db.recipeEmbedding.create({
-                data: {
+        try {
+            const embedding = await generateRecipeEmbedding(
+                validatedData.title,
+                validatedData.description,
+                ingredientNames
+            );
+            await db.recipeEmbedding.upsert({
+                where: { recipeId: recipe.id },
+                create: {
                     recipeId: recipe.id,
+                    embedding: JSON.stringify(embedding),
+                },
+                update: {
                     embedding: JSON.stringify(embedding),
                 },
             });
             console.log(`[Sync] Embedding generated for synced recipe ${recipe.id}`);
-        }).catch((err) => {
+        } catch (err) {
             console.error('[Sync] Embedding generation failed (non-critical):', err);
-        });
+        }
 
         return successResponse({
             recipeId: recipe.id,

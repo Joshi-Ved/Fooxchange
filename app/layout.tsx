@@ -63,21 +63,27 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
-    <ClerkProvider>
-      <html lang="en">
-        <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-        >
-          <PWAProvider>
-            <Navbar />
-            {children}
-            <PWAInstallBanner />
-            <PWAUpdateNotification />
-            <OfflineIndicator />
-          </PWAProvider>
-        </body>
-      </html>
-    </ClerkProvider>
+  const authEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+
+  const appShell = (
+    <html lang="en">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+        <PWAProvider>
+          <Navbar />
+          {children}
+          <PWAInstallBanner />
+          <PWAUpdateNotification />
+          <OfflineIndicator />
+        </PWAProvider>
+      </body>
+    </html>
   );
+
+  if (!authEnabled) {
+    return appShell;
+  }
+
+  return <ClerkProvider>{appShell}</ClerkProvider>;
 }

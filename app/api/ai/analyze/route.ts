@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
         const validatedData = analyzeRecipeSchema.parse(body);
 
         // 4. Fetch recipe with timeout
+        let fetchTimeoutId: ReturnType<typeof setTimeout>;
         const recipe = await Promise.race([
             db.recipe.findUnique({
                 where: { id: validatedData.recipeId },
@@ -68,16 +69,17 @@ export async function POST(req: NextRequest) {
                     },
                 },
             }),
-            new Promise<null>((_, reject) =>
-                setTimeout(() => reject(new Error('Database timeout')), 5000)
-            )
-        ]);
+            new Promise<null>((_, reject) => {
+                fetchTimeoutId = setTimeout(() => reject(new Error('Database timeout')), 5000);
+            })
+        ]).finally(() => clearTimeout(fetchTimeoutId!));
 
         if (!recipe) {
             return notFoundError('Recipe');
         }
 
         // 5. Run ML analysis in parallel with timeout
+        let analysisTimeoutId: ReturnType<typeof setTimeout>;
         const analysisPromise = Promise.all([
             predictCookingDifficulty(recipe),
             estimateNutrition(recipe),
@@ -86,10 +88,10 @@ export async function POST(req: NextRequest) {
 
         const [difficulty, nutrition, tips] = await Promise.race([
             analysisPromise,
-            new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Analysis timeout')), 10000) // 10-second max timeout
-            )
-        ]);
+            new Promise<never>((_, reject) => {
+                analysisTimeoutId = setTimeout(() => reject(new Error('Analysis timeout')), 10000);
+            })
+        ]).finally(() => clearTimeout(analysisTimeoutId!));
 
         return successResponse({
             recipeId: validatedData.recipeId,

@@ -5,27 +5,40 @@
  * Prompts users to install the app on their device
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Download, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { usePWA } from '@/components/providers/pwa-provider';
 
+const DISMISS_KEY = 'pwa-install-banner-dismissed';
+
 export function PWAInstallBanner() {
     const { install } = usePWA();
-    const [dismissed, setDismissed] = useState(false);
+    const [dismissed, setDismissed] = useState(true); // default hidden until hydration
+
+    // Hydrate dismissed state from localStorage
+    useEffect(() => {
+        const stored = localStorage.getItem(DISMISS_KEY);
+        setDismissed(stored === 'true');
+    }, []);
 
     // Don't show if already installed, not installable, or user dismissed
     if (!install.isInstallable || install.isInstalled || dismissed) {
         return null;
     }
 
+    const handleDismiss = () => {
+        setDismissed(true);
+        localStorage.setItem(DISMISS_KEY, 'true');
+    };
+
     const handleInstall = async () => {
         const result = await install.promptInstall();
         if (result.accepted) {
             console.log('User accepted the install prompt');
         } else {
-            setDismissed(true);
+            handleDismiss();
         }
     };
 
@@ -53,7 +66,7 @@ export function PWAInstallBanner() {
                         <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => setDismissed(true)}
+                            onClick={handleDismiss}
                             className="text-green-700"
                         >
                             Not now
@@ -63,7 +76,7 @@ export function PWAInstallBanner() {
                 <Button
                     size="icon"
                     variant="ghost"
-                    onClick={() => setDismissed(true)}
+                    onClick={handleDismiss}
                     className="flex-shrink-0 -mt-1 -mr-1"
                 >
                     <X className="w-4 h-4" />

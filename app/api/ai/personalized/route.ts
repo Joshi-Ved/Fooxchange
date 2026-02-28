@@ -57,22 +57,25 @@ export async function GET(req: NextRequest) {
         });
 
         // 4. Learn user's taste profile with timeout
+        let tasteTimeoutId: ReturnType<typeof setTimeout>;
         const tasteProfile = await Promise.race([
             learnUserTasteProfile(userId),
-            new Promise<any>((_, reject) =>
-                setTimeout(() => reject(new Error('Taste profile timeout')), 10000)
-            )
-        ]);
+            new Promise<any>((_, reject) => {
+                tasteTimeoutId = setTimeout(() => reject(new Error('Taste profile timeout')), 10000);
+            })
+        ]).finally(() => clearTimeout(tasteTimeoutId!));
 
         // 5. Get collaborative recommendations with timeout
+        let collabTimeoutId: ReturnType<typeof setTimeout>;
         const collaborativeRecs = await Promise.race([
             getCollaborativeRecommendations(userId, validatedData.limit),
-            new Promise<any[]>((_, reject) =>
-                setTimeout(() => reject(new Error('Collaborative timeout')), 10000)
-            )
-        ]);
+            new Promise<any[]>((_, reject) => {
+                collabTimeoutId = setTimeout(() => reject(new Error('Collaborative timeout')), 10000);
+            })
+        ]).finally(() => clearTimeout(collabTimeoutId!));
 
         // 6. Get recent recipes as candidates for prediction
+        let dbTimeoutId: ReturnType<typeof setTimeout>;
         const recentRecipes = await Promise.race([
             db.recipe.findMany({
                 take: 100,
@@ -98,18 +101,19 @@ export async function GET(req: NextRequest) {
                     },
                 },
             }),
-            new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Database timeout')), 5000)
-            )
-        ]);
+            new Promise<never>((_, reject) => {
+                dbTimeoutId = setTimeout(() => reject(new Error('Database timeout')), 5000);
+            })
+        ]).finally(() => clearTimeout(dbTimeoutId!));
 
         // 7. Predict user preferences with timeout
+        let predTimeoutId: ReturnType<typeof setTimeout>;
         const predictions = await Promise.race([
             predictUserPreferences(userId, recentRecipes),
-            new Promise<any[]>((_, reject) =>
-                setTimeout(() => reject(new Error('Prediction timeout')), 15000)
-            )
-        ]);
+            new Promise<any[]>((_, reject) => {
+                predTimeoutId = setTimeout(() => reject(new Error('Prediction timeout')), 15000);
+            })
+        ]).finally(() => clearTimeout(predTimeoutId!));
 
         // 8. Combine and deduplicate
         const feedRecipes = [

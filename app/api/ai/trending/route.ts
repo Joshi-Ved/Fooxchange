@@ -57,12 +57,13 @@ export async function GET(req: NextRequest) {
         const hours = hoursMap[validatedData.timeWindow];
 
         // 4. Get trending recipes with timeout
+        let trendingTimeoutId: ReturnType<typeof setTimeout>;
         const trending = await Promise.race([
             getTrendingRecipes(hours, validatedData.limit),
-            new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Trending query timeout')), 10000)
-            )
-        ]);
+            new Promise<never>((_, reject) => {
+                trendingTimeoutId = setTimeout(() => reject(new Error('Trending query timeout')), 10000);
+            })
+        ]).finally(() => clearTimeout(trendingTimeoutId!));
 
         return successResponse({
             trending,

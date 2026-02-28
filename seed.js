@@ -54,9 +54,12 @@ async function seed() {
 
         console.log("✅ Created", ingredients.length, "ingredients");
 
-        // Create a sample recipe
-        const recipe = await prisma.recipe.create({
-            data: {
+        // Create a sample recipe (use upsert to allow re-running seed)
+        const recipe = await prisma.recipe.upsert({
+            where: { id: 'seed-recipe-fried-rice' },
+            update: {},
+            create: {
+                id: 'seed-recipe-fried-rice',
                 title: "Classic Chicken Fried Rice",
                 description:
                     "A delicious and easy fried rice recipe perfect for using leftover rice. Quick, flavorful, and satisfying!",
@@ -135,9 +138,12 @@ async function seed() {
 
         console.log("✅ Created recipe:", recipe.title);
 
-        // Create another recipe
-        const recipe2 = await prisma.recipe.create({
-            data: {
+        // Create another recipe (use upsert for idempotency)
+        const recipe2 = await prisma.recipe.upsert({
+            where: { id: 'seed-recipe-tomato-pasta' },
+            update: {},
+            create: {
+                id: 'seed-recipe-tomato-pasta',
                 title: "Fresh Tomato Garlic Pasta",
                 description:
                     "Simple Italian-inspired pasta with fresh tomatoes and garlic. Ready in 30 minutes!",

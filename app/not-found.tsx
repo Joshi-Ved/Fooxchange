@@ -22,10 +22,10 @@ export default function NotFound() {
 
                 {/* Message */}
                 <h1 className="mb-4 text-3xl font-bold sm:text-4xl">
-                    Recipe Not Found
+                    Page Not Found
                 </h1>
                 <p className="mb-8 text-lg text-muted-foreground">
-                    Oops! This recipe seems to have been eaten already. 🍽️
+                    Oops! The page you&apos;re looking for doesn&apos;t exist. 🍽️
                 </p>
 
                 {/* Actions */}

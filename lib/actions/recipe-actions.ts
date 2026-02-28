@@ -122,12 +122,9 @@ export async function createRecipe(data: RecipeFormData) {
 
         // 5. Generate embedding for semantic search (async, non-blocking)
         // Note: In Vercel serverless, this promise might be killed if not awaited.
-        // For debugging, avoiding await to keep it fast, but logging initiation.
-        /* TEMPORARILY DISABLED FOR DEBUGGING
         generateRecipeEmbeddingForSearch(recipe.id, validatedData).catch((err) =>
             console.error('[Recipe Action] Embedding generation failed:', err)
         );
-        */
 
         // 6. Revalidate relevant paths
         revalidatePath("/");

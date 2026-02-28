@@ -71,6 +71,9 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     const streamRef = useRef<MediaStream | null>(null);
     const continuousRef = useRef(false);
     const fpsCounterRef = useRef({ frames: 0, lastTime: Date.now() });
+    // Refs to avoid stale closures in continuous detection loop
+    const detectRef = useRef<typeof detect>(null!);
+    const drawBoundingBoxesRef = useRef<typeof drawBoundingBoxes>(null!);
 
     // Edge AI Vision hook
     const {
@@ -81,6 +84,11 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         loadModel,
         detect,
     } = useEdgeVision({ minConfidence: 0.5 });
+
+    // Keep refs in sync with latest function references
+    useEffect(() => {
+        detectRef.current = detect;
+    }, [detect]);
 
     // Load model when camera starts
     useEffect(() => {
@@ -200,6 +208,11 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         }
     }, []);
 
+    // Keep drawBoundingBoxes ref in sync
+    useEffect(() => {
+        drawBoundingBoxesRef.current = drawBoundingBoxes;
+    }, [drawBoundingBoxes]);
+
     // Start camera
     const startCamera = useCallback(async () => {
         if (!isSupported) {
@@ -261,10 +274,10 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             context.drawImage(video, 0, 0);
 
             // Run Edge AI detection directly on canvas
-            const result = await detect(canvas);
+            const result = await detectRef.current(canvas);
 
             // Draw bounding boxes on overlay
-            drawBoundingBoxes(result.objects, video.videoWidth, video.videoHeight);
+            drawBoundingBoxesRef.current(result.objects, video.videoWidth, video.videoHeight);
 
             // Convert to ingredients format
             const ingredients: DetectedIngredient[] = result.objects.map(obj => ({
@@ -305,26 +318,9 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         } finally {
             setIsScanning(false);
         }
-    }, [detect, onIngredientsDetected, drawBoundingBoxes]);
+    }, [onIngredientsDetected]);
 
     // Continuous detection mode (real-time YOLO-like scanning)
-    const toggleContinuousMode = useCallback(() => {
-        if (continuousRef.current) {
-            continuousRef.current = false;
-            setIsContinuousMode(false);
-            // Clear overlay
-            const overlay = overlayCanvasRef.current;
-            if (overlay) {
-                const ctx = overlay.getContext('2d');
-                ctx?.clearRect(0, 0, overlay.width, overlay.height);
-            }
-        } else {
-            continuousRef.current = true;
-            setIsContinuousMode(true);
-            runContinuousDetection();
-        }
-    }, []);
-
     const runContinuousDetection = useCallback(async () => {
         if (!continuousRef.current || !videoRef.current || !canvasRef.current) return;
 
@@ -338,8 +334,8 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             canvas.height = video.videoHeight;
             context.drawImage(video, 0, 0);
 
-            const result = await detect(canvas);
-            drawBoundingBoxes(result.objects, video.videoWidth, video.videoHeight);
+            const result = await detectRef.current(canvas);
+            drawBoundingBoxesRef.current(result.objects, video.videoWidth, video.videoHeight);
 
             const ingredients: DetectedIngredient[] = result.objects.map(obj => ({
                 name: obj.name,
@@ -364,7 +360,24 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         if (continuousRef.current) {
             requestAnimationFrame(runContinuousDetection);
         }
-    }, [detect, drawBoundingBoxes]);
+    }, []);
+
+    const toggleContinuousMode = useCallback(() => {
+        if (continuousRef.current) {
+            continuousRef.current = false;
+            setIsContinuousMode(false);
+            // Clear overlay
+            const overlay = overlayCanvasRef.current;
+            if (overlay) {
+                const ctx = overlay.getContext('2d');
+                ctx?.clearRect(0, 0, overlay.width, overlay.height);
+            }
+        } else {
+            continuousRef.current = true;
+            setIsContinuousMode(true);
+            runContinuousDetection();
+        }
+    }, [runContinuousDetection]);
 
     // Cleanup on unmount
     const handleClose = useCallback(() => {
@@ -538,38 +551,41 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
 
             {/* Controls */}
             {hasPermission && !modelLoading && (
-                <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-4">
+                <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-3 px-4">
                     {/* Single capture button */}
                     <Button
-                        size="lg"
+                        size="sm"
                         onClick={captureAndAnalyze}
                         disabled={isScanning || isContinuousMode}
-                        className="rounded-full w-16 h-16 shadow-lg"
+                        className="shadow-lg"
                     >
-                        <Camera className="w-8 h-8" />
+                        <Camera className="mr-2 h-4 w-4" />
+                        Scan Once
                     </Button>
 
                     {/* Continuous/YOLO mode toggle */}
                     <Button
-                        size="lg"
+                        size="sm"
                         variant={isContinuousMode ? "destructive" : "secondary"}
                         onClick={toggleContinuousMode}
                         disabled={isScanning}
-                        className="rounded-full w-16 h-16 shadow-lg"
+                        className="shadow-lg"
                         title={isContinuousMode ? "Stop real-time scanning" : "Start real-time YOLO scanning"}
                     >
-                        <RefreshCw className={`w-6 h-6 ${isContinuousMode ? 'animate-spin' : ''}`} />
+                        <RefreshCw className={`mr-2 h-4 w-4 ${isContinuousMode ? 'animate-spin' : ''}`} />
+                        {isContinuousMode ? 'Stop Live Scan' : 'Start Live Scan'}
                     </Button>
 
                     {/* Confirm button (when items detected in continuous mode) */}
                     {isContinuousMode && detectedItems.length > 0 && (
                         <Button
-                            size="lg"
+                            size="sm"
                             variant="default"
                             onClick={confirmDetections}
-                            className="rounded-full w-16 h-16 shadow-lg bg-green-600 hover:bg-green-700"
+                            className="shadow-lg bg-green-600 hover:bg-green-700"
                         >
-                            <CheckCircle className="w-8 h-8" />
+                            <CheckCircle className="mr-2 h-4 w-4" />
+                            Use Detected
                         </Button>
                     )}
                 </div>

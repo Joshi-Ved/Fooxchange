@@ -42,13 +42,23 @@ export async function getRecipeById(id: string) {
     }
 }
 
-export async function toggleSaveRecipe(userId: string, recipeId: string) {
+export async function toggleSaveRecipe(clerkUserId: string, recipeId: string) {
     try {
+        // Resolve Clerk userId to DB userId
+        const dbUser = await db.user.findUnique({
+            where: { clerkId: clerkUserId },
+            select: { id: true },
+        });
+
+        if (!dbUser) {
+            throw new Error("User not found");
+        }
+
         // Check if already saved
         const existing = await db.savedRecipe.findUnique({
             where: {
                 userId_recipeId: {
-                    userId,
+                    userId: dbUser.id,
                     recipeId,
                 },
             },
@@ -66,7 +76,7 @@ export async function toggleSaveRecipe(userId: string, recipeId: string) {
             // Save
             await db.savedRecipe.create({
                 data: {
-                    userId,
+                    userId: dbUser.id,
                     recipeId,
                 },
             });
