@@ -50,15 +50,10 @@ next-env.d.ts
 # generated prisma client (old custom path - keep ignored)
 /lib/generated/prisma
 
-# internal documentation (keep only README.md and ALL SETUP folder)
-PHASE*.md
-PLAN.md
-PLAN2.md
-DEBUGGING-REPORT.md
+# internal documentation - ignore all .md except README.md
 *.md
 !README.md
-!PLAN3.md
-!"ALL SETUP"/*.md
+!readme.md
 
 # temporary files created by Claude Code
 tmpclaude-*

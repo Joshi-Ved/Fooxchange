@@ -62,7 +62,6 @@ ALLOWED_ORIGINS=https://fooxchange.vercel.app,https://www.fooxchange.com
 | **Netlify** | Free tier  | Easy setup, form handling | Fewer Next.js optimizations |
 | **Railway** | $5/month | Full database included | Paid |
 | **Fly.io** | Free tier | Docker support | More complex setup |
-| **AWS Amplify** | Pay-as-you-go | AWS ecosystem | More expensive |
 
 ---
 

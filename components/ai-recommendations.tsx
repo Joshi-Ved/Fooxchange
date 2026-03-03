@@ -65,15 +65,20 @@ export function AIRecommendations({ ingredients, preferences }: AIRecommendation
                 }),
             });
 
+            if (response.status === 401) {
+                setError('Sign in to get personalized AI recommendations');
+                return;
+            }
+
             if (!response.ok) {
                 throw new Error('Failed to get recommendations');
             }
 
             const data = await response.json();
-            setRecommendations(data.recommendations);
+            setRecommendations(data.recommendations || []);
         } catch (err) {
             console.error('Recommendation error:', err);
-            setError('Failed to load recommendations');
+            setError('Failed to load recommendations. Please try again.');
         } finally {
             setLoading(false);
         }

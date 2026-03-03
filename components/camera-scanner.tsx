@@ -221,6 +221,15 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         }
 
         try {
+            // Check if mediaDevices API is available (requires HTTPS or localhost)
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                setError(
+                    'Camera API not available. This feature requires HTTPS. ' +
+                    'If running locally, use localhost instead of an IP address.'
+                );
+                return;
+            }
+
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: 'environment',
@@ -235,9 +244,21 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                 setHasPermission(true);
                 setError('');
             }
-        } catch (err) {
+        } catch (err: unknown) {
             console.error('Camera access error:', err);
-            setError('Failed to access camera. Please grant camera permissions.');
+            const domErr = err as DOMException;
+            if (domErr.name === 'NotAllowedError' || domErr.name === 'PermissionDeniedError') {
+                setError(
+                    'Camera permission was denied. Please allow camera access in your browser settings: ' +
+                    'click the lock/info icon in the address bar → Site Settings → Camera → Allow, then reload.'
+                );
+            } else if (domErr.name === 'NotFoundError' || domErr.name === 'DevicesNotFoundError') {
+                setError('No camera found on this device. Please connect a camera and try again.');
+            } else if (domErr.name === 'NotReadableError' || domErr.name === 'TrackStartError') {
+                setError('Camera is already in use by another application. Please close it and try again.');
+            } else {
+                setError('Failed to access camera: ' + (domErr.message || 'Unknown error'));
+            }
         }
     }, [isSupported]);
 
@@ -433,8 +454,24 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                                     This feature requires WebGL and WebAssembly.
                                 </p>
                                 <Button onClick={handleClose} variant="outline" className="w-full">
-                                    Go Back
+                                    Go Back &amp; Type Ingredients Manually
                                 </Button>
+                            </>
+                        ) : error ? (
+                            <>
+                                <AlertCircle className="w-16 h-16 mx-auto mb-4 text-red-500" />
+                                <h3 className="text-lg font-semibold mb-2">Camera Access Issue</h3>
+                                <p className="text-sm text-muted-foreground mb-4 whitespace-pre-line">
+                                    {error}
+                                </p>
+                                <div className="flex flex-col gap-2">
+                                    <Button onClick={startCamera} className="w-full">
+                                        Try Again
+                                    </Button>
+                                    <Button onClick={handleClose} variant="outline" className="w-full">
+                                        Go Back &amp; Type Ingredients Manually
+                                    </Button>
+                                </div>
                             </>
                         ) : (
                             <>
