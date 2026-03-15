@@ -24,6 +24,8 @@ export function CreateRecipeForm() {
     const router = useRouter();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [uploadProgress, setUploadProgress] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
+    const [uploadError, setUploadError] = useState<string | null>(null);
 
     // Form state
     const [title, setTitle] = useState("");
@@ -103,23 +105,30 @@ export function CreateRecipeForm() {
 
         try {
             // Upload image file first if selected
-            let finalImageUrl = imageUrl;
+            let finalImageUrl = imageUrl.startsWith('blob:') ? '' : imageUrl;
 
             if (imageFile) {
                 try {
+                    setUploadProgress('uploading');
+                    setUploadError(null);
                     const formData = new FormData();
                     formData.append("file", imageFile);
                     const uploadRes = await fetch("/api/upload", {
                         method: "POST",
                         body: formData,
                     });
+                    const data = await uploadRes.json();
                     if (uploadRes.ok) {
-                        const data = await uploadRes.json();
                         finalImageUrl = data.url;
+                        setUploadProgress('done');
+                    } else {
+                        setUploadProgress('error');
+                        setUploadError(data.error || "Image upload failed. The recipe will be saved without an image.");
+                        finalImageUrl = "";
                     }
                 } catch {
-                    // If upload fails, try using the blob URL or skip image
-                    console.warn("Image upload failed, proceeding without image");
+                    setUploadProgress('error');
+                    setUploadError("Could not reach upload server. The recipe will be saved without an image.");
                     finalImageUrl = "";
                 }
             }
@@ -182,6 +191,13 @@ export function CreateRecipeForm() {
                     </div>
                 )}
 
+                {uploadError && (
+                    <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 dark:bg-yellow-950/20 dark:border-yellow-700 dark:text-yellow-300 px-4 py-3 rounded text-sm flex items-center gap-2">
+                        <span>⚠️</span>
+                        <span>{uploadError}</span>
+                    </div>
+                )}
+
                 {/* Basic Info */}
                 <div className="space-y-4">
                     <div>
@@ -223,6 +239,19 @@ export function CreateRecipeForm() {
                                     alt="Recipe preview"
                                     className="w-full h-64 object-cover rounded-lg"
                                 />
+                                {uploadProgress === 'uploading' && (
+                                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-lg">
+                                        <div className="text-white text-center">
+                                            <div className="animate-spin w-8 h-8 border-2 border-white border-t-transparent rounded-full mx-auto mb-2" />
+                                            <p className="text-sm">Uploading image...</p>
+                                        </div>
+                                    </div>
+                                )}
+                                {uploadProgress === 'done' && (
+                                    <div className="absolute top-2 left-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full">
+                                        ✓ Uploaded
+                                    </div>
+                                )}
                                 <Button
                                     type="button"
                                     variant="destructive"
@@ -234,6 +263,8 @@ export function CreateRecipeForm() {
                                         }
                                         setImageUrl("");
                                         setImageFile(null);
+                                        setUploadProgress('idle');
+                                        setUploadError(null);
                                     }}
                                 >
                                     Remove
@@ -427,11 +458,11 @@ export function CreateRecipeForm() {
                 <div className="flex gap-4">
                     <Button
                         type="submit"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || uploadProgress === 'uploading'}
                         className="flex-1"
                         size="lg"
                     >
-                        {isSubmitting ? "Creating Recipe..." : "Publish Recipe"}
+                        {uploadProgress === 'uploading' ? "Uploading image..." : isSubmitting ? "Creating Recipe..." : "Publish Recipe"}
                     </Button>
                     <Button
                         type="button"

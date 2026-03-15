@@ -1,0 +1,108 @@
+# Food Ingredient Classes for Fooxchange YOLO Model
+# These 80 classes cover the most common ingredients & dishes
+# recognised by the camera scanner → recipe suggestion system.
+#
+# How to use:
+#   python training/prepare_dataset.py \
+#       --src training_imageset/archive \
+#       --out training/yolo_dataset \
+#       --classes training/food_classes.yaml
+#
+# Map class index → recipe ingredient name (used in the web app).
+names:
+  # === Fruits ===
+  0:  apple
+  1:  banana
+  2:  orange
+  3:  lemon
+  4:  lime
+  5:  mango
+  6:  pineapple
+  7:  strawberry
+  8:  grapes
+  9:  watermelon
+  10: pear
+  11: peach
+  12: cherry
+  13: kiwi
+  14: avocado
+  15: coconut
+  16: pomegranate
+  17: papaya
+  # === Vegetables ===
+  18: tomato
+  19: potato
+  20: onion
+  21: garlic
+  22: ginger
+  23: carrot
+  24: broccoli
+  25: spinach
+  26: cabbage
+  27: capsicum
+  28: green_chili
+  29: red_chili
+  30: cucumber
+  31: eggplant
+  32: peas
+  33: corn
+  34: mushroom
+  35: cauliflower
+  36: celery
+  37: asparagus
+  38: zucchini
+  39: pumpkin
+  40: radish
+  41: beetroot
+  42: lettuce
+  43: sweet_potato
+  44: okra
+  45: bitter_gourd
+  # === Proteins ===
+  46: chicken
+  47: egg
+  48: fish
+  49: shrimp
+  50: beef
+  51: lamb
+  52: tofu
+  53: paneer
+  54: lentils
+  55: chickpeas
+  56: kidney_beans
+  57: black_beans
+  # === Grains & Dairy ===
+  58: rice
+  59: bread
+  60: flour
+  61: pasta
+  62: oats
+  63: milk
+  64: yogurt
+  65: butter
+  66: cheese
+  67: cream
+  # === Spices & Condiments ===
+  68: turmeric
+  69: cumin
+  70: coriander
+  71: cardamom
+  72: cinnamon
+  73: cloves
+  74: salt
+  75: sugar
+  76: oil
+  77: soy_sauce
+  # === Prepared Dishes ===
+  78: curry
+  79: biryani
+  80: pizza
+  81: sandwich
+  82: salad
+  83: soup
+  84: cake
+  85: donut
+  86: hot_dog
+  87: fried_rice
+
+nc: 88   # total number of classes

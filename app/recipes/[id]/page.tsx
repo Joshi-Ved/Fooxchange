@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getRecipeById, isRecipeSaved } from "@/lib/actions/detail-actions";
+import { getRecipeById, isRecipeSaved, getSimilarRecipes } from "@/lib/actions/detail-actions";
 import { CookMode } from "@/components/recipes/cook-mode";
 import { SaveRecipeButton } from "@/components/recipes/save-recipe-button";
 import { RecipeActions } from "@/components/recipes/recipe-actions";
@@ -11,6 +11,7 @@ import {
     Users,
     ChefHat,
     ArrowLeft,
+    Sparkles,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -61,16 +62,18 @@ export default async function RecipeDetailPage({
     // Check if current user has saved this recipe
     const isSaved = userId ? await isRecipeSaved(userId, id) : false;
 
+    // Fetch similar recipes and check authorship in parallel
+    const [similarRecipes, dbUserResult] = await Promise.all([
+        getSimilarRecipes(id, 4),
+        userId
+            ? db.user.findUnique({ where: { clerkId: userId }, select: { id: true } })
+            : Promise.resolve(null),
+    ]);
+
     // Check if current user is the author (for edit/delete)
     let isAuthor = false;
-    if (userId) {
-        const dbUser = await db.user.findUnique({
-            where: { clerkId: userId },
-            select: { id: true },
-        });
-        if (dbUser) {
-            isAuthor = recipe.author && recipe.authorId === dbUser.id;
-        }
+    if (userId && dbUserResult) {
+        isAuthor = recipe.author && recipe.authorId === dbUserResult.id;
     }
 
     const totalTime = (recipe.prepTime || 0) + (recipe.cookTime || 0);
@@ -271,6 +274,108 @@ export default async function RecipeDetailPage({
                         </div>
                     </div>
                 </div>
+
+                {/* ── You can try this as well ── */}
+                {similarRecipes.length > 0 && (
+                    <section className="mt-12">
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-rose-500">
+                                <Sparkles className="h-5 w-5 text-white" />
+                            </div>
+                            <div>
+                                <h2 className="text-2xl font-bold">You can try this as well</h2>
+                                <p className="text-sm text-muted-foreground">Recipes with similar ingredients you might enjoy</p>
+                            </div>
+                        </div>
+
+                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                            {similarRecipes.map((similar) => {
+                                const totalMin = (similar.prepTime || 0) + (similar.cookTime || 0);
+                                const diffColor = {
+                                    EASY: "text-green-600 bg-green-50 dark:bg-green-950/30",
+                                    MEDIUM: "text-orange-600 bg-orange-50 dark:bg-orange-950/30",
+                                    HARD: "text-red-600 bg-red-50 dark:bg-red-950/30",
+                                }[similar.difficulty as "EASY" | "MEDIUM" | "HARD"] ?? "text-muted-foreground bg-muted";
+
+                                return (
+                                    <Link key={similar.id} href={`/recipes/${similar.id}`}>
+                                        <Card className="group h-full overflow-hidden transition-all hover:shadow-lg hover:-translate-y-0.5">
+                                            {/* Image */}
+                                            <div className="relative h-40 w-full bg-gradient-to-br from-orange-100 to-rose-100 dark:from-orange-950/30 dark:to-rose-950/30">
+                                                {similar.imageUrl ? (
+                                                    <Image
+                                                        src={similar.imageUrl}
+                                                        alt={similar.title}
+                                                        fill
+                                                        className="object-cover transition-transform group-hover:scale-105"
+                                                    />
+                                                ) : (
+                                                    <div className="flex h-full items-center justify-center text-4xl">🍽️</div>
+                                                )}
+                                                {/* Difficulty badge */}
+                                                <span className={`absolute top-2 right-2 text-xs font-semibold px-2 py-0.5 rounded-full ${diffColor}`}>
+                                                    {similar.difficulty.charAt(0) + similar.difficulty.slice(1).toLowerCase()}
+                                                </span>
+                                            </div>
+
+                                            <CardContent className="p-4">
+                                                <h3 className="font-semibold text-sm leading-tight line-clamp-2 group-hover:text-orange-600 transition-colors">
+                                                    {similar.title}
+                                                </h3>
+
+                                                <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+                                                    {totalMin > 0 && (
+                                                        <span className="flex items-center gap-1">
+                                                            <Clock className="h-3 w-3" />
+                                                            {totalMin} min
+                                                        </span>
+                                                    )}
+                                                    <span className="flex items-center gap-1">
+                                                        <Users className="h-3 w-3" />
+                                                        {similar.servings}
+                                                    </span>
+                                                </div>
+
+                                                <div className="mt-2 flex flex-wrap gap-1">
+                                                    {similar.ingredients.slice(0, 3).map((ri) => (
+                                                        <span
+                                                            key={ri.ingredient.id}
+                                                            className="text-xs bg-muted rounded px-1.5 py-0.5 text-muted-foreground"
+                                                        >
+                                                            {ri.ingredient.name}
+                                                        </span>
+                                                    ))}
+                                                    {similar.ingredients.length > 3 && (
+                                                        <span className="text-xs text-muted-foreground">
+                                                            +{similar.ingredients.length - 3} more
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                <div className="mt-3 flex items-center gap-2">
+                                                    {similar.author.avatarUrl ? (
+                                                        <Image
+                                                            src={similar.author.avatarUrl}
+                                                            alt={similar.author.name}
+                                                            width={20}
+                                                            height={20}
+                                                            className="rounded-full"
+                                                        />
+                                                    ) : (
+                                                        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-rose-500 text-[10px] font-bold text-white">
+                                                            {similar.author.name.charAt(0)}
+                                                        </div>
+                                                    )}
+                                                    <span className="text-xs text-muted-foreground truncate">{similar.author.name}</span>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    </Link>
+                                );
+                            })}
+                        </div>
+                    </section>
+                )}
             </div>
         </div>
     );

@@ -43,12 +43,15 @@ def prepare_dataset(src_dir: str, out_dir: str, val_frac=0.1, test_frac=0.1):
     # simple heuristic: single object per image -> bbox covers most of image (centered)
     for split, items in splits.items():
         for src_path, cls in items:
-            dst_img = out / split / 'images' / src_path.name
+            # Prefix filename with class to avoid collisions across classes
+            unique_name = f"{cls}_{src_path.name}"
+            unique_stem = f"{cls}_{src_path.stem}"
+            dst_img = out / split / 'images' / unique_name
             shutil.copyfile(src_path, dst_img)
 
             # create YOLO label with single bbox centered (x_c y_c w h in normalized coords)
             # width/height set to 0.9 of image by default
-            label_path = out / split / 'labels' / (src_path.stem + '.txt')
+            label_path = out / split / 'labels' / (unique_stem + '.txt')
             cls_idx = class_to_idx[cls]
             x_c = 0.5
             y_c = 0.5
@@ -62,14 +65,15 @@ def prepare_dataset(src_dir: str, out_dir: str, val_frac=0.1, test_frac=0.1):
         for c in classes:
             fh.write(c + '\n')
 
-    dataset_yaml = out / 'dataset.yaml'
-    content = f"""
-train: {out / 'train' / 'images'}
-val: {out / 'val' / 'images'}
-test: {out / 'test' / 'images'}
+        dataset_yaml = out / 'dataset.yaml'
+        names_block = '\n  '.join([f'{i}: {c}' for i, c in enumerate(classes)])
+        content = f"""path: {out.as_posix()}
+train: train/images
+val: val/images
+test: test/images
 
 names:
-  {\n.join([f'{i}: {c}' for i, c in enumerate(classes)])}
+    {names_block}
 """
     with open(dataset_yaml, 'w') as fh:
         fh.write(content)

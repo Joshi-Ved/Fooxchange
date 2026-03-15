@@ -1,0 +1,7 @@
+# This directory stores the food YOLO ONNX model used by the camera scanner.
+# Run the training pipeline to generate these files:
+#   python training/train_yolo.py --epochs 100 --batch 16
+#
+# Files expected here after training:
+#   food_yolo.onnx   - ONNX model (~6MB for yolov8n)
+#   classes.json     - Class index→name mapping

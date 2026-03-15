@@ -57,3 +57,17 @@ next-env.d.ts
 
 # temporary files created by Claude Code
 tmpclaude-*
+
+# training images - too large for git, local only
+training_imageset/
+
+# training artifacts - generated locally
+runs/
+training/yolo_dataset/
+yolov8n.pt
+*.pt
+*.onnx
+
+# keep placeholder files but ignore generated model binaries
+!public/models/**/.gitkeep
+!public/uploads/.gitkeep

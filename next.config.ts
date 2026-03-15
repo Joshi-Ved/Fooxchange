@@ -31,7 +31,16 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: 'images.clerk.dev',
       },
+      // Allow locally-uploaded images served in dev/Docker
+      {
+        protocol: 'http',
+        hostname: 'localhost',
+        port: '3000',
+        pathname: '/uploads/**',
+      },
     ],
+    // Allow unoptimized images from public/uploads during dev
+    unoptimized: process.env.NODE_ENV === 'development',
   },
 
   // Security headers
@@ -92,7 +101,9 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: 'Access-Control-Allow-Origin',
-            value: process.env.ALLOWED_ORIGINS || 'https://fooxchange.com' // NO wildcard - explicit origin required
+            value: process.env.NODE_ENV === 'development'
+              ? 'http://localhost:3000'
+              : (process.env.ALLOWED_ORIGINS || 'https://fooxchange.com')
           },
           {
             key: 'Access-Control-Allow-Methods',

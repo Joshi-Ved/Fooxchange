@@ -13,10 +13,11 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Camera, X, CheckCircle, Loader2, AlertCircle, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Camera, X, CheckCircle, Loader2, AlertCircle, AlertTriangle, RefreshCw, Sparkles, ChefHat, Clock, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useEdgeVision, type DetectedObject } from '@/lib/hooks/use-edge-vision';
+import Link from 'next/link';
 
 interface DetectedIngredient {
     name: string;
@@ -56,6 +57,20 @@ function getBBoxColor(className: string): string {
     return BBOX_COLORS[className.toLowerCase()] || BBOX_COLORS.default;
 }
 
+interface RecipeSuggestion {
+    recipe: {
+        id: string;
+        title: string;
+        description: string;
+        imageUrl: string | null;
+        prepTime: number | null;
+        cookTime: number | null;
+        difficulty: string;
+    };
+    matchPercent: number;
+    reason: string;
+}
+
 export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerProps) {
     const [isScanning, setIsScanning] = useState(false);
     const [isContinuousMode, setIsContinuousMode] = useState(false);
@@ -64,6 +79,11 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     const [detectedItems, setDetectedItems] = useState<DetectedIngredient[]>([]);
     const [processingTime, setProcessingTime] = useState<number>(0);
     const [fps, setFps] = useState<number>(0);
+
+    // Recipe suggestions state
+    const [recipeSuggestions, setRecipeSuggestions] = useState<RecipeSuggestion[]>([]);
+    const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
+    const [showSuggestions, setShowSuggestions] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -414,6 +434,34 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         }
     }, [detectedItems, onIngredientsDetected]);
 
+    // Fetch recipe suggestions from the server based on detected ingredients
+    const suggestRecipes = useCallback(async (ingredients: DetectedIngredient[]) => {
+        if (ingredients.length === 0) return;
+        setIsFetchingSuggestions(true);
+        setShowSuggestions(true);
+        setRecipeSuggestions([]);
+        try {
+            const res = await fetch('/api/ai/from-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    detectedIngredients: ingredients.map((i) => i.name),
+                    limit: 5,
+                }),
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setRecipeSuggestions(data.data?.suggestions ?? []);
+            } else if (res.status === 401) {
+                setError('Sign in to get recipe suggestions.');
+            }
+        } catch {
+            // non-fatal — suggestions panel just stays empty
+        } finally {
+            setIsFetchingSuggestions(false);
+        }
+    }, []);
+
     return (
         <div className="fixed inset-0 z-50 bg-black">
             {/* Header */}
@@ -524,7 +572,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                         )}
 
                         {/* Results overlay */}
-                        {detectedItems.length > 0 && !isScanning && (
+                        {detectedItems.length > 0 && !isScanning && !showSuggestions && (
                             <div className="absolute bottom-28 left-4 right-4">
                                 <Card className="p-4 max-h-64 overflow-y-auto">
                                     <div className="flex items-center gap-2 mb-3">
@@ -559,15 +607,119 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                                         ))}
                                     </div>
                                     {!isContinuousMode && (
-                                        <Button
-                                            className="w-full mt-3"
-                                            size="sm"
-                                            onClick={confirmDetections}
-                                        >
-                                            Use These Ingredients
-                                        </Button>
+                                        <div className="flex gap-2 mt-3">
+                                            <Button
+                                                className="flex-1"
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={confirmDetections}
+                                            >
+                                                Use as Ingredients
+                                            </Button>
+                                            <Button
+                                                className="flex-1 bg-gradient-to-r from-orange-500 to-rose-500 text-white hover:from-orange-600 hover:to-rose-600"
+                                                size="sm"
+                                                onClick={() => suggestRecipes(detectedItems)}
+                                            >
+                                                <Sparkles className="w-3 h-3 mr-1" />
+                                                Suggest Recipes
+                                            </Button>
+                                        </div>
                                     )}
                                 </Card>
+                            </div>
+                        )}
+
+                        {/* Recipe Suggestions Panel */}
+                        {showSuggestions && (
+                            <div className="absolute inset-0 bg-black/90 overflow-y-auto">
+                                <div className="p-4 pt-16">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="text-white font-bold text-lg flex items-center gap-2">
+                                            <Sparkles className="w-5 h-5 text-orange-400" />
+                                            Recipe Suggestions
+                                        </h3>
+                                        <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="text-white hover:bg-white/20"
+                                            onClick={() => setShowSuggestions(false)}
+                                        >
+                                            Back to Camera
+                                        </Button>
+                                    </div>
+
+                                    <p className="text-white/60 text-xs mb-4">
+                                        Based on: {detectedItems.map((i) => i.name).join(', ')}
+                                    </p>
+
+                                    {isFetchingSuggestions ? (
+                                        <div className="flex items-center justify-center py-12">
+                                            <div className="text-center text-white">
+                                                <Loader2 className="w-10 h-10 animate-spin mx-auto mb-3 text-orange-400" />
+                                                <p className="text-sm">Finding matching recipes…</p>
+                                            </div>
+                                        </div>
+                                    ) : recipeSuggestions.length === 0 ? (
+                                        <div className="text-center text-white/60 py-12">
+                                            <ChefHat className="w-12 h-12 mx-auto mb-3 opacity-40" />
+                                            <p className="text-sm">No recipes found for these ingredients.</p>
+                                            <p className="text-xs mt-1">Try scanning more items or adding recipes to the app.</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {recipeSuggestions.map((s) => (
+                                                <Card key={s.recipe.id} className="p-4 bg-white/10 border-white/20 text-white">
+                                                    <div className="flex items-start gap-3">
+                                                        {s.recipe.imageUrl ? (
+                                                            <img
+                                                                src={s.recipe.imageUrl}
+                                                                alt={s.recipe.title}
+                                                                className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                                                            />
+                                                        ) : (
+                                                            <div className="w-16 h-16 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0 text-2xl">
+                                                                🍽️
+                                                            </div>
+                                                        )}
+                                                        <div className="min-w-0 flex-1">
+                                                            <h4 className="font-semibold text-sm leading-tight">{s.recipe.title}</h4>
+                                                            <p className="text-xs text-white/60 mt-0.5 line-clamp-2">{s.reason}</p>
+                                                            <div className="flex items-center gap-3 mt-2 text-xs text-white/60">
+                                                                {s.recipe.prepTime && (
+                                                                    <span className="flex items-center gap-1">
+                                                                        <Clock className="w-3 h-3" />
+                                                                        {(s.recipe.prepTime || 0) + (s.recipe.cookTime || 0)} min
+                                                                    </span>
+                                                                )}
+                                                                {s.matchPercent > 0 && (
+                                                                    <span className="px-1.5 py-0.5 bg-green-500/30 text-green-300 rounded-full">
+                                                                        {s.matchPercent}% match
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <Link href={`/recipes/${s.recipe.id}`} onClick={handleClose}>
+                                                            <Button size="sm" variant="ghost" className="text-orange-400 hover:bg-white/10 p-1">
+                                                                <ExternalLink className="w-4 h-4" />
+                                                            </Button>
+                                                        </Link>
+                                                    </div>
+                                                </Card>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <div className="mt-4 flex gap-2">
+                                        <Button
+                                            className="flex-1"
+                                            variant="outline"
+                                            onClick={confirmDetections}
+                                        >
+                                            Add Ingredients to Recipe
+                                        </Button>
+                                    </div>
+                                </div>
                             </div>
                         )}
                     </>
@@ -615,15 +767,26 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
 
                     {/* Confirm button (when items detected in continuous mode) */}
                     {isContinuousMode && detectedItems.length > 0 && (
-                        <Button
-                            size="sm"
-                            variant="default"
-                            onClick={confirmDetections}
-                            className="shadow-lg bg-green-600 hover:bg-green-700"
-                        >
-                            <CheckCircle className="mr-2 h-4 w-4" />
-                            Use Detected
-                        </Button>
+                        <>
+                            <Button
+                                size="sm"
+                                variant="default"
+                                onClick={confirmDetections}
+                                className="shadow-lg bg-green-600 hover:bg-green-700"
+                            >
+                                <CheckCircle className="mr-2 h-4 w-4" />
+                                Use Detected
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant="default"
+                                onClick={() => suggestRecipes(detectedItems)}
+                                className="shadow-lg bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600"
+                            >
+                                <Sparkles className="mr-2 h-4 w-4" />
+                                Recipes
+                            </Button>
+                        </>
                     )}
                 </div>
             )}
