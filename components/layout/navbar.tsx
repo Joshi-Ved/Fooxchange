@@ -15,7 +15,7 @@ export function Navbar() {
     };
 
     return (
-        <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <nav className="sticky top-0 z-50 w-full border-b bg-background/95">
             <div className="container flex h-16 items-center justify-between px-4">
                 {/* Logo */}
                 <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
@@ -93,11 +93,11 @@ export function Navbar() {
             </div>
 
             {/* Mobile Navigation */}
-            <div className="md:hidden border-t bg-background/95 backdrop-blur">
+            <div className="md:hidden border-t bg-background/95">
                 <div className="container flex items-center justify-around py-2 px-4">
                     <Link
                         href="/recipes"
-                        className={`flex flex-col items-center gap-1 text-xs ${isActive("/recipes") ? "text-orange-500" : "text-muted-foreground"
+                        className={`flex flex-col items-center gap-1 text-xs rounded-md px-4 py-2 active:scale-95 transition-transform ${isActive("/recipes") ? "text-orange-500" : "text-muted-foreground"
                             }`}
                     >
                         <Search className="h-5 w-5" />
@@ -105,7 +105,7 @@ export function Navbar() {
                     </Link>
                     <Link
                         href="/recipes/create"
-                        className={`flex flex-col items-center gap-1 text-xs ${isActive("/recipes/create") ? "text-orange-500" : "text-muted-foreground"
+                        className={`flex flex-col items-center gap-1 text-xs rounded-md px-4 py-2 active:scale-95 transition-transform ${isActive("/recipes/create") ? "text-orange-500" : "text-muted-foreground"
                             }`}
                     >
                         <Plus className="h-5 w-5" />

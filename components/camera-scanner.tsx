@@ -90,6 +90,10 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const continuousRef = useRef(false);
+    const isDetectingRef = useRef(false);
+    const rafIdRef = useRef<number | null>(null);
+    const autoConfirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastUiUpdateRef = useRef(0);
     const fpsCounterRef = useRef({ frames: 0, lastTime: Date.now() });
     // Refs to avoid stale closures in continuous detection loop
     const detectRef = useRef<typeof detect>(null!);
@@ -116,6 +120,15 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             loadModel();
         }
     }, [hasPermission, modelLoading, loadModel]);
+
+    // Lock body scroll while scanner is open to prevent background scroll jitter
+    useEffect(() => {
+        const prevOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = prevOverflow;
+        };
+    }, []);
 
     /**
      * Draw OpenCV-style bounding boxes on the overlay canvas
@@ -285,6 +298,15 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     // Stop camera
     const stopCamera = useCallback(() => {
         continuousRef.current = false;
+        isDetectingRef.current = false;
+        if (rafIdRef.current !== null) {
+            cancelAnimationFrame(rafIdRef.current);
+            rafIdRef.current = null;
+        }
+        if (autoConfirmTimeoutRef.current) {
+            clearTimeout(autoConfirmTimeoutRef.current);
+            autoConfirmTimeoutRef.current = null;
+        }
         setIsContinuousMode(false);
         if (streamRef.current) {
             streamRef.current.getTracks().forEach((track) => track.stop());
@@ -341,16 +363,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                 fpsCounterRef.current.lastTime = now;
             }
 
-            // Auto-confirm high-confidence results
-            const highConfidenceItems = ingredients.filter(
-                (item) => item.confidence > 0.75
-            );
-
-            if (!continuousRef.current && highConfidenceItems.length > 0) {
-                setTimeout(() => {
-                    onIngredientsDetected(ingredients);
-                }, 2000);
-            } else if (ingredients.length === 0 && !continuousRef.current) {
+            if (ingredients.length === 0 && !continuousRef.current) {
                 setError('No food items detected. Try getting closer or improving lighting.');
             }
         } catch (err) {
@@ -364,8 +377,13 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     // Continuous detection mode (real-time YOLO-like scanning)
     const runContinuousDetection = useCallback(async () => {
         if (!continuousRef.current || !videoRef.current || !canvasRef.current) return;
+        if (isDetectingRef.current) {
+            rafIdRef.current = requestAnimationFrame(runContinuousDetection);
+            return;
+        }
 
         try {
+            isDetectingRef.current = true;
             const video = videoRef.current;
             const canvas = canvasRef.current;
             const context = canvas.getContext('2d');
@@ -383,12 +401,15 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                 confidence: obj.confidence,
                 bbox: obj.bbox,
             }));
-            setDetectedItems(ingredients);
-            setProcessingTime(result.processingTime);
+            const now = Date.now();
+            if (now - lastUiUpdateRef.current > 140) {
+                lastUiUpdateRef.current = now;
+                setDetectedItems(ingredients);
+                setProcessingTime(result.processingTime);
+            }
 
             // FPS
             fpsCounterRef.current.frames++;
-            const now = Date.now();
             if (now - fpsCounterRef.current.lastTime >= 1000) {
                 setFps(fpsCounterRef.current.frames);
                 fpsCounterRef.current.frames = 0;
@@ -396,16 +417,23 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             }
         } catch {
             // Ignore errors in continuous mode
+        } finally {
+            isDetectingRef.current = false;
         }
 
         if (continuousRef.current) {
-            requestAnimationFrame(runContinuousDetection);
+            rafIdRef.current = requestAnimationFrame(runContinuousDetection);
         }
     }, []);
 
     const toggleContinuousMode = useCallback(() => {
         if (continuousRef.current) {
             continuousRef.current = false;
+            isDetectingRef.current = false;
+            if (rafIdRef.current !== null) {
+                cancelAnimationFrame(rafIdRef.current);
+                rafIdRef.current = null;
+            }
             setIsContinuousMode(false);
             // Clear overlay
             const overlay = overlayCanvasRef.current;
@@ -423,6 +451,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     // Cleanup on unmount
     const handleClose = useCallback(() => {
         continuousRef.current = false;
+        isDetectingRef.current = false;
         stopCamera();
         onClose();
     }, [stopCamera, onClose]);
@@ -436,7 +465,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
 
     // Fetch recipe suggestions from the server based on detected ingredients
     const suggestRecipes = useCallback(async (ingredients: DetectedIngredient[]) => {
-        if (ingredients.length === 0) return;
+        if (ingredients.length === 0 || isFetchingSuggestions) return;
         setIsFetchingSuggestions(true);
         setShowSuggestions(true);
         setRecipeSuggestions([]);
@@ -481,6 +510,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                             variant="ghost"
                             size="icon"
                             onClick={handleClose}
+                            disabled={isFetchingSuggestions}
                             className="text-white hover:bg-white/20"
                         >
                             <X className="w-6 h-6" />
@@ -573,8 +603,8 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
 
                         {/* Results overlay */}
                         {detectedItems.length > 0 && !isScanning && !showSuggestions && (
-                            <div className="absolute bottom-28 left-4 right-4">
-                                <Card className="p-4 max-h-64 overflow-y-auto">
+                            <div className="absolute bottom-28 left-4 right-4 pointer-events-none">
+                                <Card className="p-4 max-h-64 overflow-y-auto pointer-events-auto">
                                     <div className="flex items-center gap-2 mb-3">
                                         <CheckCircle className="w-5 h-5 text-green-500" />
                                         <p className="font-semibold">Detected Ingredients</p>
@@ -612,6 +642,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                                                 className="flex-1"
                                                 size="sm"
                                                 variant="outline"
+                                                disabled={isFetchingSuggestions}
                                                 onClick={confirmDetections}
                                             >
                                                 Use as Ingredients
@@ -619,6 +650,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                                             <Button
                                                 className="flex-1 bg-gradient-to-r from-orange-500 to-rose-500 text-white hover:from-orange-600 hover:to-rose-600"
                                                 size="sm"
+                                                disabled={isFetchingSuggestions}
                                                 onClick={() => suggestRecipes(detectedItems)}
                                             >
                                                 <Sparkles className="w-3 h-3 mr-1" />
@@ -632,7 +664,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
 
                         {/* Recipe Suggestions Panel */}
                         {showSuggestions && (
-                            <div className="absolute inset-0 bg-black/90 overflow-y-auto">
+                            <div className="absolute inset-0 bg-black/90 overflow-y-auto overscroll-contain">
                                 <div className="p-4 pt-16">
                                     <div className="flex items-center justify-between mb-4">
                                         <h3 className="text-white font-bold text-lg flex items-center gap-2">
@@ -642,6 +674,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                                         <Button
                                             size="sm"
                                             variant="ghost"
+                                            disabled={isFetchingSuggestions}
                                             className="text-white hover:bg-white/20"
                                             onClick={() => setShowSuggestions(false)}
                                         >
@@ -714,6 +747,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                                         <Button
                                             className="flex-1"
                                             variant="outline"
+                                            disabled={isFetchingSuggestions}
                                             onClick={confirmDetections}
                                         >
                                             Add Ingredients to Recipe
@@ -745,7 +779,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                     <Button
                         size="sm"
                         onClick={captureAndAnalyze}
-                        disabled={isScanning || isContinuousMode}
+                        disabled={isScanning || isContinuousMode || isFetchingSuggestions}
                         className="shadow-lg"
                     >
                         <Camera className="mr-2 h-4 w-4" />
@@ -757,7 +791,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                         size="sm"
                         variant={isContinuousMode ? "destructive" : "secondary"}
                         onClick={toggleContinuousMode}
-                        disabled={isScanning}
+                        disabled={isScanning || isFetchingSuggestions}
                         className="shadow-lg"
                         title={isContinuousMode ? "Stop real-time scanning" : "Start real-time YOLO scanning"}
                     >
@@ -772,6 +806,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                                 size="sm"
                                 variant="default"
                                 onClick={confirmDetections}
+                                disabled={isFetchingSuggestions}
                                 className="shadow-lg bg-green-600 hover:bg-green-700"
                             >
                                 <CheckCircle className="mr-2 h-4 w-4" />
@@ -780,6 +815,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                             <Button
                                 size="sm"
                                 variant="default"
+                                disabled={isFetchingSuggestions}
                                 onClick={() => suggestRecipes(detectedItems)}
                                 className="shadow-lg bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600"
                             >
