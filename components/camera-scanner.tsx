@@ -77,6 +77,8 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     const [hasPermission, setHasPermission] = useState(false);
     const [error, setError] = useState<string>('');
     const [detectedItems, setDetectedItems] = useState<DetectedIngredient[]>([]);
+    const [rawTopPredictions, setRawTopPredictions] = useState<Array<{ name: string; confidence: number }>>([]);
+    const [rawCount, setRawCount] = useState(0);
     const [processingTime, setProcessingTime] = useState<number>(0);
     const [fps, setFps] = useState<number>(0);
 
@@ -395,6 +397,8 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             }));
 
             setDetectedItems(ingredients);
+            setRawTopPredictions(result.rawTopPredictions);
+            setRawCount(result.rawCount);
             setProcessingTime(result.processingTime);
 
             // Update FPS counter
@@ -407,7 +411,11 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             }
 
             if (ingredients.length === 0 && !continuousRef.current) {
-                setError('No food items detected. Try getting closer or improving lighting.');
+                if (result.rawCount > 0) {
+                    setError('Model is detecting objects, but none matched ingredient classes. Check the top predictions below.');
+                } else {
+                    setError('No objects detected. Try getting closer or improving lighting.');
+                }
             }
         } catch (err) {
             console.error('Scanning error:', err);
@@ -448,6 +456,8 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             if (now - lastUiUpdateRef.current > 140) {
                 lastUiUpdateRef.current = now;
                 setDetectedItems(ingredients);
+                setRawTopPredictions(result.rawTopPredictions);
+                setRawCount(result.rawCount);
                 setProcessingTime(result.processingTime);
             }
 
@@ -701,6 +711,31 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                                             </Button>
                                         </div>
                                     )}
+                                </Card>
+                            </div>
+                        )}
+
+                        {/* Diagnostic overlay when model detects non-ingredient objects */}
+                        {detectedItems.length === 0 && rawCount > 0 && !isScanning && !showSuggestions && (
+                            <div className="absolute bottom-28 left-4 right-4 pointer-events-none">
+                                <Card className="p-4 pointer-events-auto border-amber-300 bg-amber-50">
+                                    <div className="flex items-center gap-2 mb-2 text-amber-900">
+                                        <AlertTriangle className="w-4 h-4" />
+                                        <p className="text-sm font-semibold">Model is active, but no ingredient class matched</p>
+                                    </div>
+                                    <p className="text-xs text-amber-800 mb-2">
+                                        Top model predictions ({rawCount} total):
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {rawTopPredictions.map((pred) => (
+                                            <span
+                                                key={`${pred.name}-${pred.confidence}`}
+                                                className="text-xs bg-amber-100 text-amber-900 px-2 py-1 rounded-full"
+                                            >
+                                                {pred.name} {Math.round(pred.confidence * 100)}%
+                                            </span>
+                                        ))}
+                                    </div>
                                 </Card>
                             </div>
                         )}

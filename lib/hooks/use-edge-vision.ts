@@ -26,6 +26,8 @@ export interface DetectedObject {
 export interface EdgeVisionResult {
     objects: DetectedObject[];
     processingTime: number;
+    rawCount: number;
+    rawTopPredictions: Array<{ name: string; confidence: number }>;
 }
 
 interface UseEdgeVisionOptions {
@@ -164,6 +166,13 @@ export function useEdgeVision(options: UseEdgeVisionOptions = {}) {
             try {
                 // Run detection
                 const predictions = await model.detect(imageElement);
+                const rawTopPredictions = predictions
+                    .sort((a, b) => b.score - a.score)
+                    .slice(0, 5)
+                    .map((pred) => ({
+                        name: pred.class,
+                        confidence: pred.score,
+                    }));
 
                 // Filter by confidence and map to food items
                 const foodKeywords = new Set([
@@ -195,6 +204,8 @@ export function useEdgeVision(options: UseEdgeVisionOptions = {}) {
                 return {
                     objects,
                     processingTime,
+                    rawCount: predictions.length,
+                    rawTopPredictions,
                 };
             } catch (err) {
                 console.error('Detection error:', err);
