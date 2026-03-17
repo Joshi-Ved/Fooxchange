@@ -20,7 +20,22 @@ export const recipeFormSchema = z.object({
 
     imageUrl: z
         .string()
-        .url("Must be a valid image URL")
+        .refine(
+            (url) => {
+                // Allow empty strings
+                if (url === "") return true;
+                // Allow relative paths (for local uploads)
+                if (url.startsWith("/uploads/")) return true;
+                // Allow valid absolute URLs
+                try {
+                    new URL(url);
+                    return true;
+                } catch {
+                    return false;
+                }
+            },
+            "Must be a valid image URL or uploaded file path"
+        )
         .optional()
         .or(z.literal("")),
 
@@ -68,7 +83,23 @@ export const recipeFormSchema = z.object({
                     .min(5, "Step description must be at least 5 characters")
                     .max(1000, "Step description must be less than 1000 characters")
                     .trim(),
-                imageUrl: z.string().url().optional().or(z.literal("")),
+                imageUrl: z
+                    .string()
+                    .refine(
+                        (url) => {
+                            if (url === "") return true;
+                            if (url.startsWith("/uploads/")) return true;
+                            try {
+                                new URL(url);
+                                return true;
+                            } catch {
+                                return false;
+                            }
+                        },
+                        "Must be a valid image URL or uploaded file path"
+                    )
+                    .optional()
+                    .or(z.literal("")),
             })
         )
         .min(1, "At least one step is required")

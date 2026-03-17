@@ -86,7 +86,7 @@ const nextConfig: NextConfig = {
               "img-src 'self' data: blob: https://utfs.io https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://*.clerk.dev https://*.clerk.com", // Camera captures + UploadThing + Clerk avatars
               "style-src 'self' 'unsafe-inline'", // Required for some UI libraries
               "font-src 'self' data:", // Web fonts
-              "connect-src 'self' https://api.clerk.com https://utfs.io https://*.uploadthing.com wss://*.clerk.accounts.dev https://*.clerk.accounts.dev https://*.clerk.dev https://*.clerk.com", // API connections
+              "connect-src 'self' https://api.clerk.com https://utfs.io https://*.uploadthing.com wss://*.clerk.accounts.dev https://*.clerk.accounts.dev https://*.clerk.dev https://*.clerk.com https://storage.googleapis.com https://tfhub.dev https://cdn.jsdelivr.net", // API connections + TensorFlow model downloads
               "frame-src 'self' https://*.clerk.accounts.dev https://*.clerk.dev https://*.clerk.com", // Embedded Clerk widgets and auth flows
               "frame-ancestors 'none'", // Prevent clickjacking
               "base-uri 'self'",

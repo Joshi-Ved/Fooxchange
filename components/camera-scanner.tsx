@@ -257,23 +257,64 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             // Check if mediaDevices API is available (requires HTTPS or localhost)
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 setError(
-                    'Camera API not available. This feature requires HTTPS. ' +
-                    'If running locally, use localhost instead of an IP address.'
+                    `Camera API not available on this origin (${window.location.origin}). ` +
+                    'Use HTTPS, or http://localhost in development.'
                 );
                 return;
             }
 
-            const stream = await navigator.mediaDevices.getUserMedia({
+            const preferredConstraints: MediaStreamConstraints = {
                 video: {
-                    facingMode: 'environment',
+                    facingMode: { ideal: 'environment' },
                     width: { ideal: 1280 },
                     height: { ideal: 720 },
                 },
-            });
+            };
+
+            const fallbackConstraints: MediaStreamConstraints = {
+                video: true,
+            };
+
+            let stream: MediaStream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia(preferredConstraints);
+            } catch (primaryErr) {
+                // Desktop/laptop webcams often don't satisfy environment-facing constraints.
+                stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+                console.warn('[CameraScanner] Falling back to default camera constraints:', primaryErr);
+            }
 
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
                 streamRef.current = stream;
+
+                // Ensure metadata is ready before enabling scan controls.
+                await new Promise<void>((resolve) => {
+                    const video = videoRef.current;
+                    if (!video) {
+                        resolve();
+                        return;
+                    }
+
+                    if (video.readyState >= 1) {
+                        resolve();
+                        return;
+                    }
+
+                    const onLoaded = () => {
+                        video.removeEventListener('loadedmetadata', onLoaded);
+                        resolve();
+                    };
+
+                    video.addEventListener('loadedmetadata', onLoaded);
+                });
+
+                try {
+                    await videoRef.current.play();
+                } catch (playErr) {
+                    console.warn('[CameraScanner] Autoplay required user gesture or failed:', playErr);
+                }
+
                 setHasPermission(true);
                 setError('');
             }
@@ -283,12 +324,14 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             if (domErr.name === 'NotAllowedError' || domErr.name === 'PermissionDeniedError') {
                 setError(
                     'Camera permission was denied. Please allow camera access in your browser settings: ' +
-                    'click the lock/info icon in the address bar → Site Settings → Camera → Allow, then reload.'
+                    'click the lock/info icon in the address bar -> Site Settings -> Camera -> Allow, then reload.'
                 );
             } else if (domErr.name === 'NotFoundError' || domErr.name === 'DevicesNotFoundError') {
                 setError('No camera found on this device. Please connect a camera and try again.');
             } else if (domErr.name === 'NotReadableError' || domErr.name === 'TrackStartError') {
                 setError('Camera is already in use by another application. Please close it and try again.');
+            } else if (domErr.name === 'OverconstrainedError') {
+                setError('Camera constraints were not supported on this device. Please retry to use the default camera.');
             } else {
                 setError('Failed to access camera: ' + (domErr.message || 'Unknown error'));
             }
