@@ -84,7 +84,7 @@ export async function loadModelManifest(): Promise<ModelManifest | null> {
     try {
         const response = await fetch('/models/manifest.json');
         if (!response.ok) {
-            console.error('[ModelIntegrity] Manifest not found. Run build:model-hashes first.');
+            console.warn('[ModelIntegrity] Manifest not found. Run build:model-hashes first.');
             return null;
         }
         return await response.json();

@@ -109,7 +109,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         error: modelError,
         loadModel,
         detect,
-    } = useEdgeVision({ minConfidence: 0.5 });
+    } = useEdgeVision({ minConfidence: 0.25 });
 
     // Keep refs in sync with latest function references
     useEffect(() => {
@@ -250,7 +250,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
 
     // Start camera
     const startCamera = useCallback(async () => {
-        if (!isSupported) {
+        if (isSupported === false) {
             setError('Your device doesn\'t support AI scanning. This feature requires WebGL and WebAssembly.');
             return;
         }
@@ -576,7 +576,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             <div className="relative w-full h-full flex items-center justify-center">
                 {!hasPermission ? (
                     <Card className="max-w-md mx-4 p-6 text-center">
-                        {!isSupported ? (
+                        {isSupported === false ? (
                             <>
                                 <AlertTriangle className="w-16 h-16 mx-auto mb-4 text-yellow-500" />
                                 <h3 className="text-lg font-semibold mb-2">Device Not Supported</h3>

@@ -23,12 +23,14 @@ export default function CameraCheckPage() {
 	const {
 		isLoading,
 		isAnalyzing,
+		isModelReady,
+		modelSource,
 		isSupported,
 		loadProgress,
 		error,
 		loadModel,
 		detect,
-	} = useEdgeVision({ minConfidence: 0.3 });
+	} = useEdgeVision({ minConfidence: 0.2 });
 
 	const startCamera = useCallback(async () => {
 		setCameraError('');
@@ -74,6 +76,9 @@ export default function CameraCheckPage() {
 
 	const runSingleCheck = useCallback(async () => {
 		if (!videoRef.current || !canvasRef.current) return;
+		if (!isModelReady) {
+			await loadModel();
+		}
 
 		const video = videoRef.current;
 		const canvas = canvasRef.current;
@@ -94,7 +99,7 @@ export default function CameraCheckPage() {
 				confidence: obj.confidence,
 			})),
 		});
-	}, [detect]);
+	}, [detect, isModelReady, loadModel]);
 
 	return (
 		<div className="min-h-screen bg-gradient-to-b from-background to-muted/30 py-8">
@@ -108,8 +113,8 @@ export default function CameraCheckPage() {
 					<div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
 						<div className="p-3 rounded-md border bg-background">
 							<p className="font-semibold">Device Support</p>
-							<p className={isSupported ? 'text-green-600' : 'text-red-600'}>
-								{isSupported ? 'Supported' : 'Not supported'}
+							<p className={isSupported === null ? 'text-muted-foreground' : isSupported ? 'text-green-600' : 'text-red-600'}>
+								{isSupported === null ? 'Checking...' : isSupported ? 'Supported' : 'Not supported'}
 							</p>
 						</div>
 						<div className="p-3 rounded-md border bg-background">
@@ -120,8 +125,8 @@ export default function CameraCheckPage() {
 						</div>
 						<div className="p-3 rounded-md border bg-background">
 							<p className="font-semibold">Model Status</p>
-							<p className={isLoading ? 'text-amber-600' : 'text-green-600'}>
-								{isLoading ? `Loading ${loadProgress}%` : 'Ready/Idle'}
+							<p className={isLoading ? 'text-amber-600' : isModelReady ? 'text-green-600' : 'text-muted-foreground'}>
+								{isLoading ? `Loading ${loadProgress}%` : isModelReady ? `Ready (${modelSource || 'unknown'})` : 'Not loaded'}
 							</p>
 						</div>
 					</div>
