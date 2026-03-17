@@ -6,9 +6,12 @@ import { SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import { ChefHat, Plus, Search } from "lucide-react";
 
-export function Navbar() {
+interface NavbarProps {
+    authEnabled: boolean;
+}
+
+export function Navbar({ authEnabled }: NavbarProps) {
     const pathname = usePathname();
-    const authEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
     const isActive = (path: string) => {
         return pathname === path;
@@ -52,33 +55,37 @@ export function Navbar() {
                         <>
                     {/* Signed Out State */}
                     <SignedOut>
-                        <Link href="/sign-in">
-                            <Button variant="ghost" size="sm">
+                        <Button asChild variant="ghost" size="sm">
+                            <Link href="/sign-in">
                                 Sign In
-                            </Button>
-                        </Link>
-                        <Link href="/sign-up">
-                            <Button
+                            </Link>
+                        </Button>
+                        <Button
+                            asChild
+                            size="sm"
+                            className="bg-gradient-to-r from-orange-500 to-rose-500 text-white hover:from-orange-600 hover:to-rose-600"
+                        >
+                            <Link href="/sign-up">
                                 size="sm"
-                                className="bg-gradient-to-r from-orange-500 to-rose-500 text-white hover:from-orange-600 hover:to-rose-600"
-                            >
                                 Sign Up
-                            </Button>
-                        </Link>
+                            </Link>
+                        </Button>
                     </SignedOut>
 
                     {/* Signed In State */}
                     <SignedIn>
-                        <Link href="/recipes/create" className="hidden md:block">
-                            <Button
+                        <Button
+                            asChild
+                            size="sm"
+                            variant="default"
+                            className="hidden gap-2 bg-gradient-to-r from-orange-500 to-rose-500 text-white hover:from-orange-600 hover:to-rose-600 md:inline-flex"
+                        >
+                            <Link href="/recipes/create">
                                 size="sm"
-                                variant="default"
-                                className="gap-2 bg-gradient-to-r from-orange-500 to-rose-500 text-white hover:from-orange-600 hover:to-rose-600"
-                            >
                                 <Plus className="h-4 w-4" />
                                 Create Recipe
-                            </Button>
-                        </Link>
+                            </Link>
+                        </Button>
                         <UserButton
                             appearance={{
                                 elements: {

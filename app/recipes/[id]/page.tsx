@@ -53,7 +53,10 @@ export default async function RecipeDetailPage({
 }: RecipeDetailPageProps) {
     const { id } = await params;
     const recipe = await getRecipeById(id);
-    const { userId } = await auth();
+    const authEnabled = Boolean(
+        process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY,
+    );
+    const { userId } = authEnabled ? await auth() : { userId: null };
 
     if (!recipe) {
         notFound();
@@ -105,12 +108,12 @@ export default async function RecipeDetailPage({
 
                 {/* Back Button */}
                 <div className="absolute left-4 top-4">
-                    <Link href="/recipes">
-                        <Button variant="secondary" className="gap-2 rounded-full">
+                    <Button asChild variant="secondary" className="gap-2 rounded-full">
+                        <Link href="/recipes">
                             <ArrowLeft className="h-4 w-4" />
                             Back
-                        </Button>
-                    </Link>
+                        </Link>
+                    </Button>
                 </div>
             </div>
 
@@ -154,11 +157,13 @@ export default async function RecipeDetailPage({
 
                             {/* Actions */}
                             <div className="flex flex-col gap-3">
-                                <SaveRecipeButton
-                                    recipeId={recipe.id}
-                                    initialSaved={isSaved}
-                                    initialCount={recipe._count.savedBy}
-                                />
+                                {authEnabled ? (
+                                    <SaveRecipeButton
+                                        recipeId={recipe.id}
+                                        initialSaved={isSaved}
+                                        initialCount={recipe._count.savedBy}
+                                    />
+                                ) : null}
                                 <ShareButton
                                     title={recipe.title}
                                     description={recipe.description}

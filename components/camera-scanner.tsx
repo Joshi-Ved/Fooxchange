@@ -732,11 +732,11 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                                                                 )}
                                                             </div>
                                                         </div>
-                                                        <Link href={`/recipes/${s.recipe.id}`} onClick={handleClose}>
-                                                            <Button size="sm" variant="ghost" className="text-orange-400 hover:bg-white/10 p-1">
+                                                        <Button asChild size="sm" variant="ghost" className="text-orange-400 hover:bg-white/10 p-1">
+                                                            <Link href={`/recipes/${s.recipe.id}`} onClick={handleClose}>
                                                                 <ExternalLink className="w-4 h-4" />
-                                                            </Button>
-                                                        </Link>
+                                                            </Link>
+                                                        </Button>
                                                     </div>
                                                 </Card>
                                             ))}

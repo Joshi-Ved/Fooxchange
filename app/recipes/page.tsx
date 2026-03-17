@@ -77,12 +77,12 @@ export default function RecipesPage() {
                             Discover delicious dishes from our community
                         </p>
                     </div>
-                    <Link href="/recipes/create">
-                        <Button className="gap-2 rounded-full">
+                    <Button asChild className="gap-2 rounded-full">
+                        <Link href="/recipes/create">
                             <Plus className="h-5 w-5" />
                             Share Recipe
-                        </Button>
-                    </Link>
+                        </Link>
+                    </Button>
                 </div>
 
                 {/* Search Section */}
@@ -147,14 +147,14 @@ export default function RecipesPage() {
                                     ? "Try different ingredients or create a new recipe with these!"
                                     : "Be the first to share a delicious recipe with the community!"}
                             </p>
-                            <Link href="/recipes/create">
-                                <Button className="mt-6 gap-2 rounded-full">
+                            <Button asChild className="mt-6 gap-2 rounded-full">
+                                <Link href="/recipes/create">
                                     <Plus className="h-5 w-5" />
                                     {selectedIngredients.length > 0
                                         ? "Create Recipe"
                                         : "Create First Recipe"}
-                                </Button>
-                            </Link>
+                                </Link>
+                            </Button>
                         </div>
                     </div>
                 ) : (

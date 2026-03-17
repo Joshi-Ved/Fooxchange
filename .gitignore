@@ -64,6 +64,7 @@ training_imageset/
 # training artifacts - generated locally
 runs/
 training/yolo_dataset/
+training/yolo_dataset_generated/
 yolov8n.pt
 *.pt
 *.onnx

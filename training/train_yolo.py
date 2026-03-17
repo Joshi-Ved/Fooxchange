@@ -65,21 +65,28 @@ def export_to_onnx(weights: Path, imgsz: int) -> Path:
     return onnx_path
 
 
-def build_class_manifest(classes_yaml: Path, out_dir: Path):
+def build_class_manifest(manifest_source: Path, out_dir: Path):
     """Write a classes.json manifest consumed by the web app."""
     try:
         import yaml  # pip install pyyaml (included in ultralytics)
     except ImportError:
         sys.exit("❌  PyYAML not installed. Run: pip install pyyaml")
 
-    with open(classes_yaml) as f:
+    with open(manifest_source) as f:
         data = yaml.safe_load(f)
 
-    names: dict = data.get("names", {})
+    raw_names = data.get("names", {})
+    if isinstance(raw_names, list):
+        names = {str(index): name for index, name in enumerate(raw_names)}
+    elif isinstance(raw_names, dict):
+        names = {str(key): value for key, value in sorted(raw_names.items(), key=lambda item: int(item[0]))}
+    else:
+        sys.exit(f"❌  Unsupported names structure in {manifest_source}")
+
     manifest = {
         "version": "1.0",
         "model": "food-yolo-v8n",
-        "classes": {str(k): v for k, v in names.items()},
+        "classes": names,
         "nc": data.get("nc", len(names)),
     }
 
@@ -241,7 +248,10 @@ def main():
 
     # ── Write class manifest ──────────────────────────────────────────────────
     temp_manifest_dir = Path(args.project) / args.name
-    manifest_path = build_class_manifest(Path(args.classes), temp_manifest_dir)
+    manifest_source = Path(args.data)
+    if not manifest_source.exists():
+        manifest_source = Path(args.classes)
+    manifest_path = build_class_manifest(manifest_source, temp_manifest_dir)
 
     # ── Copy to public/ for the web app ──────────────────────────────────────
     copy_to_public(onnx_path, manifest_path)

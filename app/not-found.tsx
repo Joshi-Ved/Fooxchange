@@ -30,22 +30,24 @@ export default function NotFound() {
 
                 {/* Actions */}
                 <div className="flex flex-col gap-4 sm:flex-row sm:justify-center">
-                    <Link href="/">
-                        <Button className="gap-2 rounded-full" size="lg">
+                    <Button asChild className="gap-2 rounded-full" size="lg">
+                        <Link href="/">
                             <Home className="h-5 w-5" />
                             Go Home
-                        </Button>
-                    </Link>
-                    <Link href="/recipes">
-                        <Button
+                        </Link>
+                    </Button>
+                    <Button
+                        asChild
+                        variant="outline"
+                        className="gap-2 rounded-full"
+                        size="lg"
+                    >
+                        <Link href="/recipes">
                             variant="outline"
-                            className="gap-2 rounded-full"
-                            size="lg"
-                        >
                             <Search className="h-5 w-5" />
                             Browse Recipes
-                        </Button>
-                    </Link>
+                        </Link>
+                    </Button>
                 </div>
             </div>
         </div>

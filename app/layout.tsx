@@ -63,27 +63,40 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const authEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+  const authEnabled = Boolean(
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY,
+  );
 
-  const appShell = (
+  const appContent = (
+    <>
+      <Navbar authEnabled={authEnabled} />
+      {children}
+      <PWAInstallBanner />
+      <PWAUpdateNotification />
+      <OfflineIndicator />
+    </>
+  );
+
+  return (
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <PWAProvider>
-          <Navbar />
-          {children}
-          <PWAInstallBanner />
-          <PWAUpdateNotification />
-          <OfflineIndicator />
+          {authEnabled ? (
+            <ClerkProvider
+              signInUrl="/sign-in"
+              signUpUrl="/sign-up"
+              signInFallbackRedirectUrl="/"
+              signUpFallbackRedirectUrl="/"
+            >
+              {appContent}
+            </ClerkProvider>
+          ) : (
+            appContent
+          )}
         </PWAProvider>
       </body>
     </html>
   );
-
-  if (!authEnabled) {
-    return appShell;
-  }
-
-  return <ClerkProvider>{appShell}</ClerkProvider>;
 }

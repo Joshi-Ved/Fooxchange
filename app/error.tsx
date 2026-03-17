@@ -34,12 +34,12 @@ export default function Error({ error, reset }: ErrorProps) {
                         <RefreshCw className="h-4 w-4" />
                         Try Again
                     </Button>
-                    <Link href="/">
-                        <Button variant="outline" className="gap-2 rounded-full w-full sm:w-auto">
+                    <Button asChild variant="outline" className="gap-2 rounded-full w-full sm:w-auto">
+                        <Link href="/">
                             <Home className="h-4 w-4" />
                             Go Home
-                        </Button>
-                    </Link>
+                        </Link>
+                    </Button>
                 </div>
 
                 {error.digest && (

@@ -1,8 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Use standalone output only for Docker/ECS deployments (set STANDALONE=true)
-  // AWS Amplify has its own SSR adapter - do NOT enable standalone there
+  // Use standalone output only when you need a self-contained Node deployment.
   ...(process.env.STANDALONE === 'true' ? { output: 'standalone' as const } : {}),
 
   // Security: Limit request body size to prevent DoS attacks
@@ -82,15 +81,16 @@ const nextConfig: NextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://clerk.browser.js", // Required for Next.js hydration & Clerk
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://*.clerk.dev https://*.clerk.com https://clerk.browser.js", // Required for Next.js hydration & Clerk
               "worker-src 'self' blob:", // WebWorkers for AI inference
-              "img-src 'self' data: blob: https://utfs.io https://img.clerk.com https://*.clerk.accounts.dev", // Camera captures + UploadThing + Clerk avatars
+              "img-src 'self' data: blob: https://utfs.io https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://*.clerk.dev https://*.clerk.com", // Camera captures + UploadThing + Clerk avatars
               "style-src 'self' 'unsafe-inline'", // Required for some UI libraries
               "font-src 'self' data:", // Web fonts
-              "connect-src 'self' https://api.clerk.com https://utfs.io https://*.uploadthing.com wss://*.clerk.accounts.dev https://*.clerk.accounts.dev", // API connections
+              "connect-src 'self' https://api.clerk.com https://utfs.io https://*.uploadthing.com wss://*.clerk.accounts.dev https://*.clerk.accounts.dev https://*.clerk.dev https://*.clerk.com", // API connections
+              "frame-src 'self' https://*.clerk.accounts.dev https://*.clerk.dev https://*.clerk.com", // Embedded Clerk widgets and auth flows
               "frame-ancestors 'none'", // Prevent clickjacking
               "base-uri 'self'",
-              "form-action 'self'",
+              "form-action 'self' https://*.clerk.accounts.dev https://*.clerk.dev https://*.clerk.com",
             ].join('; ')
           },
         ],

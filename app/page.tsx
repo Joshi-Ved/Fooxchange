@@ -68,26 +68,30 @@ export default async function Home() {
 
             {/* CTA Buttons */}
             <div className="mt-10 flex flex-col gap-4 sm:flex-row">
-              <Link href="/recipes">
-                <Button
+              <Button
+                asChild
+                size="lg"
+                className="gap-2 rounded-full bg-gradient-to-r from-orange-500 to-rose-500 px-8 text-white hover:from-orange-600 hover:to-rose-600"
+              >
+                <Link href="/recipes">
                   size="lg"
-                  className="gap-2 rounded-full bg-gradient-to-r from-orange-500 to-rose-500 px-8 text-white hover:from-orange-600 hover:to-rose-600"
-                >
                   <ChefHat className="h-5 w-5" />
                   Browse Recipes
                   <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-              <Link href="/recipes/create">
-                <Button
+                </Link>
+              </Button>
+              <Button
+                asChild
+                size="lg"
+                variant="outline"
+                className="gap-2 rounded-full px-8"
+              >
+                <Link href="/recipes/create">
                   size="lg"
-                  variant="outline"
-                  className="gap-2 rounded-full px-8"
-                >
                   <Sparkles className="h-5 w-5" />
                   Share Your Recipe
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </div>
@@ -141,12 +145,12 @@ export default async function Home() {
                 Loved by our community of home chefs
               </p>
             </div>
-            <Link href="/recipes">
-              <Button variant="ghost" className="gap-2">
+            <Button asChild variant="ghost" className="gap-2">
+              <Link href="/recipes">
                 View all
                 <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
 
           {trendingRecipes.length > 0 ? (
@@ -161,12 +165,12 @@ export default async function Home() {
               <p className="text-muted-foreground">
                 No recipes yet. Be the first to share!
               </p>
-              <Link href="/recipes/create">
-                <Button className="mt-4 gap-2 rounded-full">
+              <Button asChild className="mt-4 gap-2 rounded-full">
+                <Link href="/recipes/create">
                   <Sparkles className="h-5 w-5" />
                   Create First Recipe
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           )}
         </div>
@@ -181,17 +185,19 @@ export default async function Home() {
           <p className="mt-4 text-lg text-white/80">
             Join thousands of home cooks exchanging their favorite dishes
           </p>
-          <Link href="/sign-up">
-            <Button
+          <Button
+            asChild
+            size="lg"
+            variant="secondary"
+            className="mt-8 gap-2 rounded-full px-8"
+          >
+            <Link href="/sign-up">
               size="lg"
-              variant="secondary"
-              className="mt-8 gap-2 rounded-full px-8"
-            >
               <ChefHat className="h-5 w-5" />
               Join Fooxchange
               <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
       </section>
 
@@ -207,15 +213,9 @@ export default async function Home() {
               © 2026 Fooxchange. Made with ❤️ for home cooks everywhere.
             </p>
             <div className="flex gap-6 text-sm text-muted-foreground">
-              <a href="#" className="hover:text-foreground transition-colors">
-                About
-              </a>
-              <a href="#" className="hover:text-foreground transition-colors">
-                Help
-              </a>
-              <a href="#" className="hover:text-foreground transition-colors">
-                Privacy
-              </a>
+              <span>Community recipes</span>
+              <span>Ingredient search</span>
+              <span>Edge AI scanner</span>
             </div>
           </div>
         </div>
