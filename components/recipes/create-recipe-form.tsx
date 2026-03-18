@@ -2,10 +2,12 @@
 
 import { useState, useRef, lazy, Suspense } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createRecipe } from "@/lib/actions/recipe-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Card } from "@/components/ui/card";
 import { Plus, Trash2, Clock, Users, ChefHat, ImageIcon, Camera, Upload } from "lucide-react";
 
 // Lazy-load heavy components to prevent hydration failures
@@ -43,7 +45,59 @@ export function CreateRecipeForm() {
     ]);
     const [steps, setSteps] = useState([{ content: "", imageUrl: "" }]);
     const [showCamera, setShowCamera] = useState(false);
+    const [suggestedRecipes, setSuggestedRecipes] = useState<Array<{
+        recipe: {
+            id: string;
+            title: string;
+            imageUrl?: string | null;
+        };
+        reason?: string;
+        matchPercent?: number;
+    }>>([]);
+    const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
+    const [suggestionError, setSuggestionError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const titleCase = (value: string) =>
+        value
+            .split(" ")
+            .filter(Boolean)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(" ");
+
+    const fetchSuggestionsFromDetected = async (ingredientNames: string[]) => {
+        if (ingredientNames.length === 0) return;
+
+        setIsFetchingSuggestions(true);
+        setSuggestionError(null);
+        try {
+            const response = await fetch("/api/ai/from-image", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ detectedIngredients: ingredientNames, limit: 6 }),
+            });
+
+            if (response.status === 401) {
+                setSuggestionError("Sign in to view recipe suggestions from scanned ingredients.");
+                setSuggestedRecipes([]);
+                return;
+            }
+
+            if (!response.ok) {
+                setSuggestionError("Could not fetch recipe suggestions right now.");
+                setSuggestedRecipes([]);
+                return;
+            }
+
+            const data = await response.json();
+            setSuggestedRecipes(data.data?.suggestions ?? []);
+        } catch {
+            setSuggestionError("Could not fetch recipe suggestions right now.");
+            setSuggestedRecipes([]);
+        } finally {
+            setIsFetchingSuggestions(false);
+        }
+    };
 
     // Ingredient handlers
     const addIngredient = () => {
@@ -417,6 +471,44 @@ export function CreateRecipeForm() {
                             )}
                         </div>
                     ))}
+
+                    {(isFetchingSuggestions || suggestionError || suggestedRecipes.length > 0) && (
+                        <Card className="p-4 gap-3">
+                            <div className="flex items-center justify-between gap-2">
+                                <h3 className="font-semibold text-sm">Suggested Recipes from Scanned Ingredients</h3>
+                                {isFetchingSuggestions && (
+                                    <span className="text-xs text-muted-foreground">Finding matches...</span>
+                                )}
+                            </div>
+
+                            {suggestionError && (
+                                <p className="text-sm text-amber-700">{suggestionError}</p>
+                            )}
+
+                            {!isFetchingSuggestions && !suggestionError && suggestedRecipes.length === 0 && (
+                                <p className="text-sm text-muted-foreground">No matching recipes found yet. Try scanning more ingredients.</p>
+                            )}
+
+                            <div className="space-y-2">
+                                {suggestedRecipes.map((item) => (
+                                    <div key={item.recipe.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
+                                        <div className="min-w-0">
+                                            <p className="font-medium text-sm truncate">{item.recipe.title}</p>
+                                            <p className="text-xs text-muted-foreground truncate">
+                                                {item.reason || "Matched from scanned ingredients"}
+                                            </p>
+                                            {typeof item.matchPercent === "number" && (
+                                                <p className="text-xs text-green-700 mt-1">{item.matchPercent}% match</p>
+                                            )}
+                                        </div>
+                                        <Button asChild variant="outline" size="sm">
+                                            <Link href={`/recipes/${item.recipe.id}`}>View</Link>
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        </Card>
+                    )}
                 </div>
 
                 {/* Steps */}
@@ -487,15 +579,47 @@ export function CreateRecipeForm() {
                 }>
                     <CameraScanner
                         onIngredientsDetected={(detected) => {
-                            const newIngredients = detected.map((item) => ({
-                                name: item.name.charAt(0).toUpperCase() + item.name.slice(1),
-                                amount: "",
-                                isOptional: false,
-                            }));
+                            const existingNames = ingredients
+                                .map((item) => item.name.trim().toLowerCase())
+                                .filter(Boolean);
+                            const detectedNames = detected
+                                .map((item) => item.name.trim().toLowerCase())
+                                .filter(Boolean);
+
+                            const mergedForSuggestions = Array.from(new Set([...existingNames, ...detectedNames]));
+
                             setIngredients((prev) => {
-                                const existing = prev.filter((ing) => ing.name.trim() !== "");
-                                return [...existing, ...newIngredients];
+                                const next = [...prev];
+                                const existing = new Set(
+                                    next.map((item) => item.name.trim().toLowerCase()).filter(Boolean)
+                                );
+
+                                for (const scannedName of detectedNames) {
+                                    if (existing.has(scannedName)) continue;
+
+                                    const emptyIndex = next.findIndex((item) => item.name.trim() === "");
+                                    const formattedName = titleCase(scannedName);
+
+                                    if (emptyIndex >= 0) {
+                                        next[emptyIndex] = {
+                                            ...next[emptyIndex],
+                                            name: formattedName,
+                                        };
+                                    } else {
+                                        next.push({
+                                            name: formattedName,
+                                            amount: "",
+                                            isOptional: false,
+                                        });
+                                    }
+
+                                    existing.add(scannedName);
+                                }
+
+                                return next;
                             });
+
+                            fetchSuggestionsFromDetected(mergedForSuggestions);
                             setShowCamera(false);
                         }}
                         onClose={() => setShowCamera(false)}
