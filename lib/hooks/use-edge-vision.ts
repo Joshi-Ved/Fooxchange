@@ -53,6 +53,34 @@ interface UseEdgeVisionOptions {
     minConfidence?: number; // Minimum confidence threshold (0-1)
 }
 
+const FOOD_KEYWORDS = new Set([
+    'apple', 'banana', 'orange', 'broccoli', 'carrot', 'hot dog',
+    'pizza', 'donut', 'cake', 'sandwich', 'bread', 'tomato', 'onion',
+    'potato', 'lemon', 'lime', 'pear', 'pineapple', 'watermelon',
+    'strawberry', 'grapes', 'peach', 'cherry', 'kiwi', 'mango',
+]);
+
+// COCO-SSD can under-score chopped produce; this keeps recall usable for food scanning.
+const LOW_CONF_PRODUCE_CLASSES = new Set(['apple', 'tomato', 'onion', 'potato', 'carrot', 'broccoli']);
+
+const normalizeCocoClassName = (
+    className: string,
+    score: number,
+    predictions: Array<{ class: string; score: number }>
+): string => {
+    const lowered = className.toLowerCase();
+
+    // Common confusion in kitchen scenes: tomato and apple.
+    if (lowered === 'apple' && score < 0.7) {
+        const tomatoCandidate = predictions.find((p) => p.class.toLowerCase() === 'tomato');
+        if (tomatoCandidate && tomatoCandidate.score >= 0.15 && score - tomatoCandidate.score <= 0.2) {
+            return 'tomato';
+        }
+    }
+
+    return lowered;
+};
+
 export function useEdgeVision(options: UseEdgeVisionOptions = {}) {
     const { autoLoad = false, minConfidence = 0.6 } = options;
 
@@ -478,22 +506,16 @@ export function useEdgeVision(options: UseEdgeVisionOptions = {}) {
                         confidence: pred.score,
                     }));
 
-                // Filter by confidence and map to food items
-                const foodKeywords = new Set([
-                    'apple', 'banana', 'orange', 'broccoli', 'carrot', 'hot dog',
-                    'pizza', 'donut', 'cake', 'sandwich', 'bread', 'tomato', 'onion',
-                    'potato', 'lemon', 'lime', 'pear', 'pineapple', 'watermelon',
-                    'strawberry', 'grapes', 'peach', 'cherry', 'kiwi', 'mango'
-                ]);
-
                 const objects: DetectedObject[] = predictions
                     .filter(pred => {
-                        const isFood = foodKeywords.has(pred.class.toLowerCase());
-                        const meetsConfidence = pred.score >= minConfidence;
+                        const normalizedClass = normalizeCocoClassName(pred.class, pred.score, predictions);
+                        const isFood = FOOD_KEYWORDS.has(normalizedClass);
+                        const relaxedConfidence = LOW_CONF_PRODUCE_CLASSES.has(normalizedClass) ? 0.15 : minConfidence;
+                        const meetsConfidence = pred.score >= relaxedConfidence;
                         return isFood && meetsConfidence;
                     })
                     .map(pred => ({
-                        name: pred.class,
+                        name: normalizeCocoClassName(pred.class, pred.score, predictions),
                         confidence: pred.score,
                         bbox: pred.bbox as [number, number, number, number],
                     }));

@@ -250,12 +250,14 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
 
     // Start camera
     const startCamera = useCallback(async () => {
+        console.log('[CameraScanner] startCamera called');
         if (isSupported === false) {
             setError('Your device doesn\'t support AI scanning. This feature requires WebGL and WebAssembly.');
             return;
         }
 
         try {
+            setError('');
             // Check if mediaDevices API is available (requires HTTPS or localhost)
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 setError(
@@ -286,40 +288,59 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                 console.warn('[CameraScanner] Falling back to default camera constraints:', primaryErr);
             }
 
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-                streamRef.current = stream;
+            console.log('[CameraScanner] Stream obtained, video ref exists:', !!videoRef.current);
+            
+            if (!videoRef.current) {
+                console.error('[CameraScanner] Video ref is null!');
+                stream.getTracks().forEach((track) => track.stop());
+                setError('Video element not available. Please try reloading the page.');
+                return;
+            }
 
-                // Ensure metadata is ready before enabling scan controls.
-                await new Promise<void>((resolve) => {
-                    const video = videoRef.current;
-                    if (!video) {
-                        resolve();
-                        return;
-                    }
+            videoRef.current.srcObject = stream;
+            streamRef.current = stream;
+            videoRef.current.muted = true;
 
-                    if (video.readyState >= 1) {
-                        resolve();
-                        return;
-                    }
-
-                    const onLoaded = () => {
-                        video.removeEventListener('loadedmetadata', onLoaded);
-                        resolve();
-                    };
-
-                    video.addEventListener('loadedmetadata', onLoaded);
-                });
-
-                try {
-                    await videoRef.current.play();
-                } catch (playErr) {
-                    console.warn('[CameraScanner] Autoplay required user gesture or failed:', playErr);
+            // Ensure metadata is ready before enabling scan controls.
+            await new Promise<void>((resolve) => {
+                const video = videoRef.current;
+                if (!video) {
+                    resolve();
+                    return;
                 }
 
-                setHasPermission(true);
-                setError('');
+                if (video.readyState >= 1) {
+                    resolve();
+                    return;
+                }
+
+                const onLoaded = () => {
+                    video.removeEventListener('loadedmetadata', onLoaded);
+                    resolve();
+                };
+
+                video.addEventListener('loadedmetadata', onLoaded);
+            });
+
+            try {
+                await videoRef.current.play();
+                console.log('[CameraScanner] Video playing successfully');
+            } catch (playErr) {
+                console.warn('[CameraScanner] Failed to start video playback:', playErr);
+                setError(
+                    'Camera opened, but video preview failed to start. Tap "Try Again" and close other apps using the camera.'
+                );
+                stream.getTracks().forEach((track) => track.stop());
+                if (videoRef.current) {
+                    videoRef.current.srcObject = null;
+                }
+                streamRef.current = null;
+                return;
             }
+
+            // SET PERMISSION OUTSIDE THE IF BLOCK - THIS IS THE FIX!
+            console.log('[CameraScanner] Setting hasPermission to true');
+            setHasPermission(true);
         } catch (err: unknown) {
             console.error('Camera access error:', err);
             const domErr = err as DOMException;
@@ -516,6 +537,29 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         }
     }, [detectedItems, onIngredientsDetected]);
 
+    const buildDetectedSearchTerms = useCallback((ingredients: DetectedIngredient[]): string[] => {
+        const aliasMap: Record<string, string[]> = {
+            apple: ['tomato'],
+            tomato: ['apple'],
+            broccoli: ['cauliflower', 'cabbage', 'mixed vegetables'],
+            carrot: ['chopped carrot', 'mixed vegetables'],
+            onion: ['chopped onion'],
+            potato: ['chopped potato'],
+        };
+
+        const terms = new Set<string>();
+        ingredients.forEach((ingredient) => {
+            const normalized = ingredient.name.toLowerCase().trim();
+            if (!normalized) return;
+            terms.add(normalized);
+
+            const aliases = aliasMap[normalized] || [];
+            aliases.forEach((alias) => terms.add(alias));
+        });
+
+        return Array.from(terms);
+    }, []);
+
     // Fetch recipe suggestions from the server based on detected ingredients
     const suggestRecipes = useCallback(async (ingredients: DetectedIngredient[]) => {
         if (ingredients.length === 0 || isFetchingSuggestions) return;
@@ -523,11 +567,12 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         setShowSuggestions(true);
         setRecipeSuggestions([]);
         try {
+            const detectedIngredients = buildDetectedSearchTerms(ingredients);
             const res = await fetch('/api/ai/from-image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    detectedIngredients: ingredients.map((i) => i.name),
+                    detectedIngredients,
                     limit: 5,
                 }),
             });
@@ -537,21 +582,33 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             } else if (res.status === 401) {
                 setError('Sign in to get recipe suggestions.');
             }
-        } catch {
+        } catch (err) {
+            console.error('Failed to fetch recipes:', err);
             // non-fatal — suggestions panel just stays empty
         } finally {
             setIsFetchingSuggestions(false);
         }
-    }, []);
+    }, [buildDetectedSearchTerms, isFetchingSuggestions]);
+
+    // Auto-fetch recipes when ingredients are detected (fire-and-forget)
+    useEffect(() => {
+        if (detectedItems.length > 0 && !showSuggestions && !isFetchingSuggestions) {
+            // Auto-fetch recipes after a short delay to let results page render first
+            const timer = setTimeout(() => {
+                suggestRecipes(detectedItems);
+            }, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [detectedItems, showSuggestions, isFetchingSuggestions, suggestRecipes]);
 
     return (
-        <div className="fixed inset-0 z-50 bg-black">
+        <div className="fixed inset-0 z-50 bg-black overflow-hidden flex flex-col">
             {/* Header */}
-            <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/80 to-transparent p-4">
+            <div className="relative z-10 bg-gradient-to-b from-black/80 to-transparent p-4 flex-shrink-0">
                 <div className="flex items-center justify-between">
                     <h2 className="text-xl font-bold text-white flex items-center gap-2">
                         <Camera className="w-6 h-6" />
-                        Scan Ingredients (Edge AI)
+                        Scan Ingredients
                     </h2>
                     <div className="flex items-center gap-2">
                         {isContinuousMode && (
@@ -572,10 +629,30 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                 </div>
             </div>
 
-            {/* Camera View */}
-            <div className="relative w-full h-full flex items-center justify-center">
+            {/* Main Content Area */}
+            <div className="flex-1 relative overflow-hidden flex">
+                {/* Always render video/canvas elements so they're available immediately */}
+                <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className={`absolute inset-0 w-full h-full object-cover bg-black ${
+                        hasPermission ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                    }`}
+                />
+                <canvas ref={canvasRef} className="hidden" />
+                {/* OpenCV-style bounding box overlay */}
+                <canvas
+                    ref={overlayCanvasRef}
+                    className={`absolute inset-0 w-full h-full object-cover pointer-events-none z-10 ${
+                        hasPermission ? 'opacity-100' : 'opacity-0'
+                    }`}
+                />
+
                 {!hasPermission ? (
-                    <Card className="max-w-md mx-4 p-6 text-center">
+                    <div className="absolute inset-0 flex items-center justify-center z-20">
+                        <Card className="max-w-md mx-4 p-6 text-center">
                         {isSupported === false ? (
                             <>
                                 <AlertTriangle className="w-16 h-16 mx-auto mb-4 text-yellow-500" />
@@ -618,24 +695,40 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                             </>
                         )}
                     </Card>
+                    </div>
                 ) : (
                     <>
-                        <video
-                            ref={videoRef}
-                            autoPlay
-                            playsInline
-                            className="w-full h-full object-cover"
-                        />
-                        <canvas ref={canvasRef} className="hidden" />
-                        {/* OpenCV-style bounding box overlay */}
-                        <canvas
-                            ref={overlayCanvasRef}
-                            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                        />
+                        {/* Live Camera Status Badge - Top left */}
+                        <div className="absolute top-20 left-4 z-20 flex items-center gap-2 bg-black/70 px-3 py-2 rounded-lg">
+                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                            <span className="text-white text-xs font-medium">Live Preview</span>
+                        </div>
+
+                        {/* Live Camera Guidance Overlay - Transparent crosshair */}
+                        {!showSuggestions && (
+                            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center z-15">
+                                {/* Transparent crosshair - should let camera show through */}
+                                <div className="relative w-40 h-40 border-2 border-cyan-400/50 rounded-lg shadow-lg opacity-70">
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                        <div className="w-0.5 h-16 bg-cyan-400/60" />
+                                        <div className="w-16 h-0.5 bg-cyan-400/60 absolute" />
+                                    </div>
+                                </div>
+                                {/* Guidance text */}
+                                <p className="text-white text-center mt-12 text-sm font-medium max-w-xs px-4 bg-black/50 py-2 rounded-lg">
+                                    Point camera at ingredients
+                                </p>
+                                {isContinuousMode && (
+                                    <p className="text-cyan-300 text-center text-xs mt-2 mx-4 bg-black/50 px-3 py-1 rounded-lg">
+                                        🔍 Live scanning active • {detectedItems.length} detected
+                                    </p>
+                                )}
+                            </div>
+                        )}
 
                         {/* Model loading overlay */}
                         {modelLoading && (
-                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                            <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-40">
                                 <Card className="p-6 text-center">
                                     <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-primary" />
                                     <p className="text-sm font-medium">Loading AI model...</p>
@@ -646,7 +739,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
 
                         {/* Scanning overlay */}
                         {isScanning && !modelLoading && !isContinuousMode && (
-                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-40">
                                 <Card className="p-6 text-center">
                                     <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-primary" />
                                     <p className="text-sm font-medium">Analyzing ingredients...</p>
@@ -654,80 +747,115 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                             </div>
                         )}
 
-                        {/* Results overlay */}
+                        {/* Results Page - Full overlay after detection */}
                         {detectedItems.length > 0 && !isScanning && !showSuggestions && (
-                            <div className="absolute bottom-28 left-4 right-4 pointer-events-none">
-                                <Card className="p-4 max-h-64 overflow-y-auto pointer-events-auto">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <CheckCircle className="w-5 h-5 text-green-500" />
-                                        <p className="font-semibold">Detected Ingredients</p>
-                                        <span className="text-xs text-muted-foreground ml-auto">
-                                            {processingTime}ms (on-device)
-                                        </span>
-                                    </div>
-                                    <div className="space-y-2">
+                            <div className="absolute inset-0 bg-black/90 z-30 flex flex-col">
+                                {/* Results Header */}
+                                <div className="flex-shrink-0 border-b border-white/10 p-4">
+                                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                        <CheckCircle className="w-6 h-6 text-green-500" />
+                                        Scan Results
+                                    </h3>
+                                </div>
+
+                                {/* Detected Items Grid */}
+                                <div className="flex-1 overflow-y-auto p-4">
+                                    <div className="grid grid-cols-2 gap-3 mb-4">
                                         {detectedItems.map((item, idx) => (
                                             <div
                                                 key={idx}
-                                                className="flex items-center justify-between text-sm"
+                                                className="bg-white/10 border border-white/20 rounded-lg p-3 hover:bg-white/15 transition-colors"
                                             >
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-2 mb-2">
                                                     <span
-                                                        className="w-3 h-3 rounded-full inline-block"
+                                                        className="w-4 h-4 rounded-full inline-block flex-shrink-0"
                                                         style={{ backgroundColor: getBBoxColor(item.name) }}
                                                     />
-                                                    <span className="font-medium capitalize">{item.name}</span>
+                                                    <span className="text-white font-semibold text-sm capitalize line-clamp-1">
+                                                        {item.name}
+                                                    </span>
                                                 </div>
-                                                <span
-                                                    className={`text-xs px-2 py-0.5 rounded-full ${item.confidence > 0.75
-                                                        ? 'bg-green-100 text-green-700'
-                                                        : 'bg-yellow-100 text-yellow-700'
-                                                        }`}
-                                                >
-                                                    {Math.round(item.confidence * 100)}%
-                                                </span>
+                                                <div className="flex items-center justify-between text-xs">
+                                                    <span className="text-white/60">Confidence</span>
+                                                    <span className={`px-2 py-1 rounded-full ${
+                                                        item.confidence > 0.75
+                                                            ? 'bg-green-500/30 text-green-300'
+                                                            : item.confidence > 0.5
+                                                            ? 'bg-yellow-500/30 text-yellow-300'
+                                                            : 'bg-orange-500/30 text-orange-300'
+                                                    }`}>
+                                                        {Math.round(item.confidence * 100)}%
+                                                    </span>
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
-                                    {!isContinuousMode && (
-                                        <div className="flex gap-2 mt-3">
-                                            <Button
-                                                className="flex-1"
-                                                size="sm"
-                                                variant="outline"
-                                                disabled={isFetchingSuggestions}
-                                                onClick={confirmDetections}
-                                            >
-                                                Use as Ingredients
-                                            </Button>
-                                            <Button
-                                                className="flex-1 bg-gradient-to-r from-orange-500 to-rose-500 text-white hover:from-orange-600 hover:to-rose-600"
-                                                size="sm"
-                                                disabled={isFetchingSuggestions}
-                                                onClick={() => suggestRecipes(detectedItems)}
-                                            >
-                                                <Sparkles className="w-3 h-3 mr-1" />
-                                                Suggest Recipes
-                                            </Button>
+
+                                    {/* Scan Stats */}
+                                    <div className="bg-white/5 rounded-lg p-3 mb-4 text-xs text-white/70 space-y-1">
+                                        <div className="flex justify-between">
+                                            <span>Total Detected:</span>
+                                            <span className="text-white font-medium">{detectedItems.length}</span>
                                         </div>
-                                    )}
-                                </Card>
+                                        <div className="flex justify-between">
+                                            <span>Processing Time:</span>
+                                            <span className="text-white font-medium">{processingTime}ms</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Action Buttons */}
+                                <div className="flex-shrink-0 border-t border-white/10 p-4 space-y-2">
+                                    <Button
+                                        size="sm"
+                                        className="w-full bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600"
+                                        onClick={() => suggestRecipes(detectedItems)}
+                                        disabled={isFetchingSuggestions}
+                                    >
+                                        {isFetchingSuggestions ? (
+                                            <>
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                Finding Recipes...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Sparkles className="mr-2 h-4 w-4" />
+                                                Find Recipes
+                                            </>
+                                        )}
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="w-full"
+                                        onClick={() => {
+                                            setDetectedItems([]);
+                                            const overlay = overlayCanvasRef.current;
+                                            if (overlay) {
+                                                const ctx = overlay.getContext('2d');
+                                                ctx?.clearRect(0, 0, overlay.width, overlay.height);
+                                            }
+                                        }}
+                                    >
+                                        Scan Again
+                                    </Button>
+                                </div>
                             </div>
                         )}
 
                         {/* Diagnostic overlay when model detects non-ingredient objects */}
-                        {detectedItems.length === 0 && rawCount > 0 && !isScanning && !showSuggestions && (
-                            <div className="absolute bottom-28 left-4 right-4 pointer-events-none">
+                        {detectedItems.length === 0 && rawCount > 0 && !isScanning && !showSuggestions && !isContinuousMode && (
+                            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none max-w-md z-20">
                                 <Card className="p-4 pointer-events-auto border-amber-300 bg-amber-50">
                                     <div className="flex items-center gap-2 mb-2 text-amber-900">
-                                        <AlertTriangle className="w-4 h-4" />
-                                        <p className="text-sm font-semibold">Model is active, but no ingredient class matched</p>
+                                        <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                                        <p className="text-xs font-semibold">Objects detected • Not ingredients</p>
                                     </div>
-                                    <p className="text-xs text-amber-800 mb-2">
-                                        Top model predictions ({rawCount} total):
+                                    <p className="text-xs text-amber-800 mb-3">
+                                        The camera sees these items. Try focusing on food:
                                     </p>
                                     <div className="flex flex-wrap gap-2">
-                                        {rawTopPredictions.map((pred) => (
+                                        {rawTopPredictions.slice(0, 4).map((pred) => (
                                             <span
                                                 key={`${pred.name}-${pred.confidence}`}
                                                 className="text-xs bg-amber-100 text-amber-900 px-2 py-1 rounded-full"
@@ -740,109 +868,155 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                             </div>
                         )}
 
-                        {/* Recipe Suggestions Panel */}
+                        {/* Recipe Suggestions Panel - Full screen overlay */}
                         {showSuggestions && (
-                            <div className="absolute inset-0 bg-black/90 overflow-y-auto overscroll-contain">
-                                <div className="p-4 pt-16">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h3 className="text-white font-bold text-lg flex items-center gap-2">
-                                            <Sparkles className="w-5 h-5 text-orange-400" />
-                                            Recipe Suggestions
-                                        </h3>
-                                        <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            disabled={isFetchingSuggestions}
-                                            className="text-white hover:bg-white/20"
-                                            onClick={() => setShowSuggestions(false)}
-                                        >
-                                            Back to Camera
-                                        </Button>
+                            <div className="absolute inset-0 bg-black/95 z-40 flex flex-col">
+                                {/* Header */}
+                                <div className="flex-shrink-0 border-b border-white/10 p-4 flex items-center justify-between">
+                                    <h3 className="text-white font-bold text-lg flex items-center gap-2">
+                                        <Sparkles className="w-6 h-6 text-orange-400 flex-shrink-0" />
+                                        Recipe Suggestions
+                                    </h3>
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="text-white hover:bg-white/20 h-8 w-8 p-0"
+                                        onClick={() => setShowSuggestions(false)}
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </Button>
+                                </div>
+
+                                {/* Detected items summary */}
+                                <div className="flex-shrink-0 bg-white/5 border-b border-white/10 p-3">
+                                    <p className="text-xs text-white/60 mb-2">Based on detected ingredients:</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {detectedItems.map((item, idx) => (
+                                            <span
+                                                key={idx}
+                                                className="text-xs px-2.5 py-1 bg-white/10 text-white/90 rounded-full border border-white/10 capitalize"
+                                            >
+                                                {item.name}
+                                            </span>
+                                        ))}
                                     </div>
+                                </div>
 
-                                    <p className="text-white/60 text-xs mb-4">
-                                        Based on: {detectedItems.map((i) => i.name).join(', ')}
-                                    </p>
-
+                                {/* Recipes content */}
+                                <div className="flex-1 overflow-y-auto p-4">
                                     {isFetchingSuggestions ? (
-                                        <div className="flex items-center justify-center py-12">
-                                            <div className="text-center text-white">
-                                                <Loader2 className="w-10 h-10 animate-spin mx-auto mb-3 text-orange-400" />
-                                                <p className="text-sm">Finding matching recipes…</p>
-                                            </div>
+                                        <div className="flex flex-col items-center justify-center h-full">
+                                            <Loader2 className="w-12 h-12 animate-spin text-orange-400 mb-3" />
+                                            <p className="text-white text-center">Finding delicious recipes for you...</p>
                                         </div>
                                     ) : recipeSuggestions.length === 0 ? (
-                                        <div className="text-center text-white/60 py-12">
-                                            <ChefHat className="w-12 h-12 mx-auto mb-3 opacity-40" />
-                                            <p className="text-sm">No recipes found for these ingredients.</p>
-                                            <p className="text-xs mt-1">Try scanning more items or adding recipes to the app.</p>
+                                        <div className="flex flex-col items-center justify-center h-full text-center">
+                                            <ChefHat className="w-16 h-16 text-white/30 mb-3" />
+                                            <p className="text-white/80 text-sm font-medium mb-2">No recipes found</p>
+                                            <p className="text-white/50 text-xs">Try different ingredients or check back later</p>
                                         </div>
                                     ) : (
                                         <div className="space-y-3">
-                                            {recipeSuggestions.map((s) => (
-                                                <Card key={s.recipe.id} className="p-4 bg-white/10 border-white/20 text-white">
-                                                    <div className="flex items-start gap-3">
-                                                        {s.recipe.imageUrl ? (
-                                                            <img
-                                                                src={s.recipe.imageUrl}
-                                                                alt={s.recipe.title}
-                                                                className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
-                                                            />
-                                                        ) : (
-                                                            <div className="w-16 h-16 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0 text-2xl">
-                                                                🍽️
+                                            {recipeSuggestions.map((suggestion) => (
+                                                <Link
+                                                    href={`/recipes/${suggestion.recipe.id}`}
+                                                    key={suggestion.recipe.id}
+                                                    onClick={handleClose}
+                                                    className="block"
+                                                >
+                                                    <Card className="bg-gradient-to-r from-white/10 to-white/5 hover:from-white/15 hover:to-white/10 border-white/20 text-white overflow-hidden transition-all hover:shadow-lg cursor-pointer">
+                                                        <div className="flex gap-3 p-3">
+                                                            {/* Recipe Image */}
+                                                            <div className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden bg-white/5 flex items-center justify-center">
+                                                                {suggestion.recipe.imageUrl ? (
+                                                                    <img
+                                                                        src={suggestion.recipe.imageUrl}
+                                                                        alt={suggestion.recipe.title}
+                                                                        className="w-full h-full object-cover"
+                                                                    />
+                                                                ) : (
+                                                                    <span className="text-3xl">🍽️</span>
+                                                                )}
                                                             </div>
-                                                        )}
-                                                        <div className="min-w-0 flex-1">
-                                                            <h4 className="font-semibold text-sm leading-tight">{s.recipe.title}</h4>
-                                                            <p className="text-xs text-white/60 mt-0.5 line-clamp-2">{s.reason}</p>
-                                                            <div className="flex items-center gap-3 mt-2 text-xs text-white/60">
-                                                                {s.recipe.prepTime && (
-                                                                    <span className="flex items-center gap-1">
-                                                                        <Clock className="w-3 h-3" />
-                                                                        {(s.recipe.prepTime || 0) + (s.recipe.cookTime || 0)} min
-                                                                    </span>
-                                                                )}
-                                                                {s.matchPercent > 0 && (
-                                                                    <span className="px-1.5 py-0.5 bg-green-500/30 text-green-300 rounded-full">
-                                                                        {s.matchPercent}% match
-                                                                    </span>
-                                                                )}
+
+                                                            {/* Recipe Info */}
+                                                            <div className="flex-1 min-w-0">
+                                                                <h4 className="font-bold text-sm mb-1 line-clamp-2 leading-tight">
+                                                                    {suggestion.recipe.title}
+                                                                </h4>
+                                                                
+                                                                <div className="flex flex-wrap gap-2 mb-2">
+                                                                    {suggestion.matchPercent > 0 && (
+                                                                        <span className="inline-flex items-center gap-1 text-xs bg-green-500/20 text-green-300 px-2 py-1 rounded-full">
+                                                                            <CheckCircle className="w-3 h-3" />
+                                                                            {suggestion.matchPercent}% match
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+
+                                                                <div className="flex items-center gap-2 text-xs text-white/60">
+                                                                    {suggestion.recipe.prepTime && suggestion.recipe.cookTime ? (
+                                                                        <span className="flex items-center gap-1">
+                                                                            <Clock className="w-3 h-3" />
+                                                                            {(suggestion.recipe.prepTime + suggestion.recipe.cookTime)} min
+                                                                        </span>
+                                                                    ) : null}
+                                                                    {suggestion.recipe.difficulty && (
+                                                                        <span className="px-2 py-0.5 bg-white/10 rounded text-xs capitalize">
+                                                                            {suggestion.recipe.difficulty}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Open Icon */}
+                                                            <div className="flex-shrink-0 flex items-center justify-center">
+                                                                <ExternalLink className="w-4 h-4 text-white/40 group-hover:text-white/70" />
                                                             </div>
                                                         </div>
-                                                        <Button asChild size="sm" variant="ghost" className="text-orange-400 hover:bg-white/10 p-1">
-                                                            <Link href={`/recipes/${s.recipe.id}`} onClick={handleClose}>
-                                                                <ExternalLink className="w-4 h-4" />
-                                                            </Link>
-                                                        </Button>
-                                                    </div>
-                                                </Card>
+                                                    </Card>
+                                                </Link>
                                             ))}
                                         </div>
                                     )}
+                                </div>
 
-                                    <div className="mt-4 flex gap-2">
-                                        <Button
-                                            className="flex-1"
-                                            variant="outline"
-                                            disabled={isFetchingSuggestions}
-                                            onClick={confirmDetections}
-                                        >
-                                            Add Ingredients to Recipe
-                                        </Button>
-                                    </div>
+                                {/* Footer buttons */}
+                                <div className="flex-shrink-0 border-t border-white/10 p-4 space-y-2 bg-black/80">
+                                    <Button
+                                        className="w-full"
+                                        variant="outline"
+                                        onClick={() => {
+                                            setShowSuggestions(false);
+                                            setDetectedItems([]);
+                                            const overlay = overlayCanvasRef.current;
+                                            if (overlay) {
+                                                const ctx = overlay.getContext('2d');
+                                                ctx?.clearRect(0, 0, overlay.width, overlay.height);
+                                            }
+                                        }}
+                                    >
+                                        Back to Scan
+                                    </Button>
+                                    <Button
+                                        className="w-full bg-green-600 hover:bg-green-700"
+                                        onClick={confirmDetections}
+                                    >
+                                        <CheckCircle className="mr-2 h-4 w-4" />
+                                        Use These Ingredients
+                                    </Button>
                                 </div>
                             </div>
                         )}
                     </>
                 )}
 
-                {/* Error message */}
-                {(error || modelError) && (
-                    <div className="absolute bottom-28 left-4 right-4">
-                        <Card className="p-4 border-red-200 bg-red-50">
+                {/* Error message - Top Area */}
+                {(error || modelError) && !showSuggestions && (
+                    <div className="absolute top-20 left-4 right-4 sm:right-auto pointer-events-none max-w-sm z-20">
+                        <Card className="p-3 border-red-200 bg-red-50 pointer-events-auto">
                             <div className="flex items-center gap-2 text-red-700">
-                                <AlertCircle className="w-5 h-5" />
+                                <AlertCircle className="w-5 h-5 flex-shrink-0" />
                                 <p className="text-sm font-medium">{error || modelError}</p>
                             </div>
                         </Card>
@@ -850,15 +1024,15 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                 )}
             </div>
 
-            {/* Controls */}
-            {hasPermission && !modelLoading && (
-                <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-3 px-4">
+            {/* Controls - Bottom Bar */}
+            {hasPermission && !modelLoading && !showSuggestions && !detectedItems.length && (
+                <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 to-black/40 p-4 flex gap-2 justify-center flex-wrap z-20">
                     {/* Single capture button */}
                     <Button
-                        size="sm"
+                        size="lg"
                         onClick={captureAndAnalyze}
-                        disabled={isScanning || isContinuousMode || isFetchingSuggestions}
-                        className="shadow-lg"
+                        disabled={isScanning || isContinuousMode}
+                        className="shadow-lg flex-1 max-w-xs"
                     >
                         <Camera className="mr-2 h-4 w-4" />
                         Scan Once
@@ -866,42 +1040,16 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
 
                     {/* Continuous/YOLO mode toggle */}
                     <Button
-                        size="sm"
+                        size="lg"
                         variant={isContinuousMode ? "destructive" : "secondary"}
                         onClick={toggleContinuousMode}
-                        disabled={isScanning || isFetchingSuggestions}
-                        className="shadow-lg"
-                        title={isContinuousMode ? "Stop real-time scanning" : "Start real-time YOLO scanning"}
+                        disabled={isScanning}
+                        className="shadow-lg flex-1 max-w-xs"
+                        title={isContinuousMode ? "Stop real-time scanning" : "Start real-time scanning"}
                     >
                         <RefreshCw className={`mr-2 h-4 w-4 ${isContinuousMode ? 'animate-spin' : ''}`} />
-                        {isContinuousMode ? 'Stop Live Scan' : 'Start Live Scan'}
+                        {isContinuousMode ? 'Stop Live' : 'Live Scan'}
                     </Button>
-
-                    {/* Confirm button (when items detected in continuous mode) */}
-                    {isContinuousMode && detectedItems.length > 0 && (
-                        <>
-                            <Button
-                                size="sm"
-                                variant="default"
-                                onClick={confirmDetections}
-                                disabled={isFetchingSuggestions}
-                                className="shadow-lg bg-green-600 hover:bg-green-700"
-                            >
-                                <CheckCircle className="mr-2 h-4 w-4" />
-                                Use Detected
-                            </Button>
-                            <Button
-                                size="sm"
-                                variant="default"
-                                disabled={isFetchingSuggestions}
-                                onClick={() => suggestRecipes(detectedItems)}
-                                className="shadow-lg bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600"
-                            >
-                                <Sparkles className="mr-2 h-4 w-4" />
-                                Recipes
-                            </Button>
-                        </>
-                    )}
                 </div>
             )}
         </div>
