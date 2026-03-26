@@ -24,14 +24,25 @@ Organize your training images like this (one folder per ingredient class):
 training_imageset/
   apple/
     001.jpg
+    001.txt
   tomato/
     001.jpg
+    001.txt
+  non_food/
+    bowl_01.jpg
+    hand_01.jpg
+    countertop_01.jpg
   onion/
     001.jpg
 ```
 
 Folder names should match `food_classes.yaml` class names.
 Free datasets: Kaggle Food-101, Fruits-360, or your own photos.
+
+Important precision notes:
+- If a `.txt` label file exists next to an image, `prepare_dataset.py` reuses that YOLO box label.
+- If no label exists, a full-image fallback box is created (good for bootstrap, lower precision).
+- Put bowls/hands/utensils/background photos under `non_food`/`negative` folders to add hard negatives.
 
 ### 3. Prepare YOLO dataset
 
@@ -44,6 +55,12 @@ python training/prepare_dataset.py --src training_imageset/archive --out trainin
 ```powershell
 # GPU recommended
 python training/train_yolo.py --epochs 100 --batch 16
+
+# Higher-precision produce run (recommended to reduce tomato/apple confusion)
+python training/train_yolo.py --weights yolov8s.pt --epochs 140 --batch 16 --imgsz 640 --close-mosaic 20
+
+# Strict production-safe run (fails fast if class taxonomy drifts or mAP50 is too low)
+python training/train_yolo.py --weights yolov8s.pt --epochs 140 --batch 16 --imgsz 640 --close-mosaic 20 --min-map50 0.35
 
 # CPU only
 python training/train_yolo.py --epochs 50 --batch 8 --device cpu
@@ -102,5 +119,9 @@ Use `--weights yolov8s.pt` for better accuracy on laptops.
 ## Notes
 
 - ONNX model runs in-browser via ONNX Runtime Web (no server calls).
-- Labels from `prepare_dataset.py` are full-image placeholders.
-  For better accuracy annotate real bounding boxes with LabelImg or Roboflow.
+- The scanner now filters to food classes only; non-food detections are ignored.
+- For best tomato vs apple separation, collect close-up examples under mixed lighting with tight box labels.
+- `train_yolo.py` now validates dataset classes against `food_classes.yaml` by default.
+- If classes drift (extra/missing labels), training exits to prevent bad deployment.
+- Use `--allow-class-mismatch` only for exploratory experiments.
+- A deployment quality gate is enabled by default: training exits if final `mAP50 < --min-map50`.

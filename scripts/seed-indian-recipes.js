@@ -2205,6 +2205,7 @@ async function main() {
         // Process each recipe
         let successCount = 0;
         let errorCount = 0;
+        let skippedCount = 0;
 
         for (const [index, recipeData] of indianRecipes.entries()) {
             try {
@@ -2227,6 +2228,19 @@ async function main() {
                         });
                     })
                 );
+
+                const existingRecipe = await prisma.recipe.findFirst({
+                    where: {
+                        authorId: user.id,
+                        title: recipeData.title,
+                    },
+                    select: { id: true },
+                });
+
+                if (existingRecipe) {
+                    skippedCount++;
+                    continue;
+                }
 
                 // Create recipe
                 await prisma.recipe.create({
@@ -2268,6 +2282,7 @@ async function main() {
 
         console.log("\n" + "=".repeat(60));
         console.log(`✅ Successfully created: ${successCount} recipes`);
+        console.log(`⏭️  Skipped existing: ${skippedCount} recipes`);
         if (errorCount > 0) {
             console.log(`❌ Failed: ${errorCount} recipes`);
         }

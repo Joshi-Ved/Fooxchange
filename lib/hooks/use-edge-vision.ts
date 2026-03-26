@@ -58,7 +58,66 @@ const FOOD_KEYWORDS = new Set([
     'pizza', 'donut', 'cake', 'sandwich', 'bread', 'tomato', 'onion',
     'potato', 'lemon', 'lime', 'pear', 'pineapple', 'watermelon',
     'strawberry', 'grapes', 'peach', 'cherry', 'kiwi', 'mango',
+    'avocado', 'coconut', 'pomegranate', 'papaya', 'garlic', 'ginger',
+    'spinach', 'cabbage', 'capsicum', 'green chili', 'red chili',
+    'cucumber', 'eggplant', 'peas', 'corn', 'mushroom', 'cauliflower',
+    'celery', 'asparagus', 'zucchini', 'pumpkin', 'radish', 'beetroot',
+    'lettuce', 'sweet potato', 'okra', 'bitter gourd', 'chicken', 'egg',
+    'fish', 'shrimp', 'beef', 'lamb', 'tofu', 'paneer', 'lentils',
+    'chickpeas', 'kidney beans', 'black beans', 'rice', 'flour', 'pasta',
+    'oats', 'milk', 'yogurt', 'butter', 'cheese', 'cream', 'turmeric',
+    'cumin', 'coriander', 'cardamom', 'cinnamon', 'cloves', 'salt',
+    'sugar', 'oil', 'soy sauce', 'curry', 'biryani', 'salad', 'soup',
+    'fried rice',
 ]);
+
+const NON_FOOD_KEYWORDS = [
+    'person', 'hand', 'bowl', 'plate', 'cup', 'glass', 'fork', 'knife',
+    'spoon', 'bottle', 'cell phone', 'laptop', 'book', 'chair', 'table',
+    'sink', 'tv', 'mouse', 'keyboard', 'toothbrush', 'remote',
+];
+
+const normalizeLabel = (className: string): string =>
+    className.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const FOOD_LABEL_ALIASES: Record<string, string> = {
+    tomatoes: 'tomato',
+    onions: 'onion',
+    potatoes: 'potato',
+    chillies: 'chili',
+    chilies: 'chili',
+    carrots: 'carrot',
+    cabbages: 'cabbage',
+    apples: 'apple',
+    bananas: 'banana',
+    oranges: 'orange',
+    lemons: 'lemon',
+    limes: 'lime',
+    breads: 'bread',
+    eggs: 'egg',
+};
+
+const canonicalizeFoodLabel = (className: string): string => {
+    const normalized = normalizeLabel(className);
+    if (FOOD_LABEL_ALIASES[normalized]) {
+        return FOOD_LABEL_ALIASES[normalized];
+    }
+    return normalized;
+};
+
+const isFoodLabel = (className: string): boolean => {
+    const normalized = canonicalizeFoodLabel(className);
+    if (NON_FOOD_KEYWORDS.some((term) => normalized.includes(term))) {
+        return false;
+    }
+
+    if (FOOD_KEYWORDS.has(normalized)) return true;
+
+    const singular = normalized.endsWith('s') ? normalized.slice(0, -1) : normalized;
+    const plural = normalized.endsWith('s') ? normalized : `${normalized}s`;
+    const singularEs = normalized.endsWith('es') ? normalized.slice(0, -2) : normalized;
+    return FOOD_KEYWORDS.has(singular) || FOOD_KEYWORDS.has(plural) || FOOD_KEYWORDS.has(singularEs);
+};
 
 // COCO-SSD can under-score chopped produce; this keeps recall usable for food scanning.
 const LOW_CONF_PRODUCE_CLASSES = new Set(['apple', 'tomato', 'onion', 'potato', 'carrot', 'broccoli']);
@@ -68,7 +127,7 @@ const normalizeCocoClassName = (
     score: number,
     predictions: Array<{ class: string; score: number }>
 ): string => {
-    const lowered = className.toLowerCase();
+    const lowered = canonicalizeFoodLabel(className);
 
     // Common confusion in kitchen scenes: tomato and apple.
     if (lowered === 'apple' && score < 0.7) {
@@ -79,6 +138,191 @@ const normalizeCocoClassName = (
     }
 
     return lowered;
+};
+
+const iouForObjects = (a: DetectedObject, b: DetectedObject): number => {
+    const [ax, ay, aw, ah] = a.bbox;
+    const [bx, by, bw, bh] = b.bbox;
+    const ax2 = ax + aw;
+    const ay2 = ay + ah;
+    const bx2 = bx + bw;
+    const by2 = by + bh;
+
+    const interX1 = Math.max(ax, bx);
+    const interY1 = Math.max(ay, by);
+    const interX2 = Math.min(ax2, bx2);
+    const interY2 = Math.min(ay2, by2);
+
+    const interW = Math.max(0, interX2 - interX1);
+    const interH = Math.max(0, interY2 - interY1);
+    const interArea = interW * interH;
+    const unionArea = aw * ah + bw * bh - interArea;
+    if (unionArea <= 0) return 0;
+    return interArea / unionArea;
+};
+
+const estimateRedDominance = (
+    imageElement: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
+    bbox: [number, number, number, number]
+): number => {
+    const [x, y, w, h] = bbox;
+    const sampleCanvas = document.createElement('canvas');
+    sampleCanvas.width = 24;
+    sampleCanvas.height = 24;
+    const ctx = sampleCanvas.getContext('2d');
+    if (!ctx) return 0;
+
+    ctx.drawImage(imageElement, x, y, Math.max(1, w), Math.max(1, h), 0, 0, 24, 24);
+    const data = ctx.getImageData(0, 0, 24, 24).data;
+    let redDominantPixels = 0;
+    const totalPixels = data.length / 4;
+
+    for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        if (r > g + 18 && r > b + 18) {
+            redDominantPixels++;
+        }
+    }
+
+    return totalPixels > 0 ? redDominantPixels / totalPixels : 0;
+};
+
+const estimateGreenDominance = (
+    imageElement: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
+    bbox: [number, number, number, number]
+): number => {
+    const [x, y, w, h] = bbox;
+    const sampleCanvas = document.createElement('canvas');
+    sampleCanvas.width = 24;
+    sampleCanvas.height = 24;
+    const ctx = sampleCanvas.getContext('2d');
+    if (!ctx) return 0;
+
+    ctx.drawImage(imageElement, x, y, Math.max(1, w), Math.max(1, h), 0, 0, 24, 24);
+    const data = ctx.getImageData(0, 0, 24, 24).data;
+    let greenDominantPixels = 0;
+    const totalPixels = data.length / 4;
+
+    for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        if (g > r + 16 && g > b + 12) {
+            greenDominantPixels++;
+        }
+    }
+
+    return totalPixels > 0 ? greenDominantPixels / totalPixels : 0;
+};
+
+const estimateYellowDominance = (
+    imageElement: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
+    bbox: [number, number, number, number]
+): number => {
+    const [x, y, w, h] = bbox;
+    const sampleCanvas = document.createElement('canvas');
+    sampleCanvas.width = 24;
+    sampleCanvas.height = 24;
+    const ctx = sampleCanvas.getContext('2d');
+    if (!ctx) return 0;
+
+    ctx.drawImage(imageElement, x, y, Math.max(1, w), Math.max(1, h), 0, 0, 24, 24);
+    const data = ctx.getImageData(0, 0, 24, 24).data;
+    let yellowDominantPixels = 0;
+    const totalPixels = data.length / 4;
+
+    for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const isYellow = r > 120 && g > 110 && b < 130 && Math.abs(r - g) < 70;
+        if (isYellow) {
+            yellowDominantPixels++;
+        }
+    }
+
+    return totalPixels > 0 ? yellowDominantPixels / totalPixels : 0;
+};
+
+const resolveProduceConfusions = (
+    objects: DetectedObject[],
+    imageElement: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement
+): DetectedObject[] => {
+    return objects.map((obj) => {
+        const label = canonicalizeFoodLabel(obj.name);
+        const [, , w, h] = obj.bbox;
+        const aspectRatio = Math.max(w, h) / Math.max(1, Math.min(w, h));
+
+        if (label === 'banana' && obj.confidence < 0.72) {
+            const greenDominance = estimateGreenDominance(imageElement, obj.bbox);
+            if (greenDominance > 0.33 && aspectRatio > 1.6) {
+                return {
+                    ...obj,
+                    name: 'cucumber',
+                    confidence: Math.max(obj.confidence, 0.58),
+                };
+            }
+        }
+
+        if (label === 'cucumber' && obj.confidence < 0.72) {
+            const yellowDominance = estimateYellowDominance(imageElement, obj.bbox);
+            if (yellowDominance > 0.28 && aspectRatio > 1.4) {
+                return {
+                    ...obj,
+                    name: 'banana',
+                    confidence: Math.max(obj.confidence, 0.58),
+                };
+            }
+        }
+        return { ...obj, name: label };
+    });
+};
+
+const resolveAppleTomatoConflicts = (
+    objects: DetectedObject[],
+    imageElement: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement
+): DetectedObject[] => {
+    const kept = [...objects];
+
+    for (let i = 0; i < kept.length; i++) {
+        const current = kept[i];
+        if (!current) continue;
+        const currentName = normalizeLabel(current.name);
+        if (currentName !== 'apple' && currentName !== 'tomato') continue;
+
+        for (let j = i + 1; j < kept.length; j++) {
+            const other = kept[j];
+            if (!other) continue;
+            const otherName = normalizeLabel(other.name);
+            const isAppleTomatoPair =
+                (currentName === 'apple' && otherName === 'tomato') ||
+                (currentName === 'tomato' && otherName === 'apple');
+
+            if (!isAppleTomatoPair) continue;
+            if (iouForObjects(current, other) < 0.35) continue;
+
+            const tomatoObj = currentName === 'tomato' ? current : other;
+            const appleObj = currentName === 'apple' ? current : other;
+            const tomatoRed = estimateRedDominance(imageElement, tomatoObj.bbox);
+            const tomatoScore = tomatoObj.confidence + (tomatoRed > 0.28 ? 0.08 : 0);
+
+            if (tomatoScore >= appleObj.confidence - 0.03) {
+                if (tomatoObj === current) {
+                    kept[j] = null as unknown as DetectedObject;
+                } else {
+                    kept[i] = null as unknown as DetectedObject;
+                }
+            } else if (tomatoObj === current) {
+                kept[i] = null as unknown as DetectedObject;
+            } else {
+                kept[j] = null as unknown as DetectedObject;
+            }
+        }
+    }
+
+    return kept.filter(Boolean);
 };
 
 export function useEdgeVision(options: UseEdgeVisionOptions = {}) {
@@ -230,11 +474,14 @@ export function useEdgeVision(options: UseEdgeVisionOptions = {}) {
             }
 
             const className = classes[bestClass] || `class_${bestClass}`;
+            const normalizedClass = canonicalizeFoodLabel(className);
             if (bestClass >= 0 && bestScore >= 0.05) {
-                rawPredictions.push({ name: className, confidence: bestScore });
+                rawPredictions.push({ name: normalizedClass, confidence: bestScore });
             }
 
-            if (bestClass < 0 || bestScore < minConfidence) continue;
+            const yoloConfidenceThreshold = Math.min(minConfidence, 0.12);
+            if (bestClass < 0 || bestScore < yoloConfidenceThreshold) continue;
+            if (!isFoodLabel(normalizedClass)) continue;
 
             const x = clamp((cx - w / 2) * scaleX, 0, imageWidth);
             const y = clamp((cy - h / 2) * scaleY, 0, imageHeight);
@@ -242,7 +489,7 @@ export function useEdgeVision(options: UseEdgeVisionOptions = {}) {
             const bh = clamp(h * scaleY, 1, imageHeight);
 
             candidates.push({
-                name: className,
+                name: normalizedClass,
                 confidence: bestScore,
                 bbox: [x, y, bw, bh],
             });
@@ -362,6 +609,21 @@ export function useEdgeVision(options: UseEdgeVisionOptions = {}) {
 
             const hasCustomModel = await loadYoloModel();
             if (hasCustomModel) {
+                // Preload COCO-SSD as a reliability fallback for frames where custom YOLO yields no food detections.
+                void (async () => {
+                    try {
+                        await tf.setBackend('webgl');
+                        await tf.ready();
+                        const fallbackModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+                        if (isMountedRef.current) {
+                            setModel(fallbackModel);
+                            console.log('ℹ️ COCO-SSD fallback model preloaded');
+                        }
+                    } catch (fallbackErr) {
+                        console.warn('[Edge Vision] COCO fallback preload failed:', fallbackErr);
+                    }
+                })();
+
                 if (isMountedRef.current) {
                     setLoadProgress(100);
                     setIsLoading(false);
@@ -477,11 +739,32 @@ export function useEdgeVision(options: UseEdgeVisionOptions = {}) {
                         yoloRuntime.inputHeight
                     );
 
-                    const objects = nms(parsed.candidates).map((candidate) => ({
+                    const filteredByFood = parsed.candidates.filter((candidate) => isFoodLabel(candidate.name));
+                    let objects = resolveProduceConfusions(resolveAppleTomatoConflicts(
+                        nms(filteredByFood).map((candidate) => ({
                         name: candidate.name,
                         confidence: candidate.confidence,
                         bbox: candidate.bbox,
-                    }));
+                        })),
+                        imageElement
+                    ), imageElement);
+
+                    // Reliability fallback: if YOLO detects nothing useful, try COCO on the same frame.
+                    if (objects.length === 0 && model) {
+                        const cocoPredictions = await model.detect(imageElement);
+                        objects = resolveProduceConfusions(resolveAppleTomatoConflicts(cocoPredictions
+                            .filter((pred) => {
+                                const normalizedClass = normalizeCocoClassName(pred.class, pred.score, cocoPredictions);
+                                const isFood = isFoodLabel(normalizedClass);
+                                const relaxedConfidence = LOW_CONF_PRODUCE_CLASSES.has(normalizedClass) ? 0.15 : minConfidence;
+                                return isFood && pred.score >= relaxedConfidence;
+                            })
+                            .map((pred) => ({
+                                name: normalizeCocoClassName(pred.class, pred.score, cocoPredictions),
+                                confidence: pred.score,
+                                bbox: pred.bbox as [number, number, number, number],
+                            })), imageElement), imageElement);
+                    }
 
                     const processingTime = Math.round(performance.now() - startTime);
                     if (isMountedRef.current) {
@@ -502,14 +785,14 @@ export function useEdgeVision(options: UseEdgeVisionOptions = {}) {
                     .sort((a, b) => b.score - a.score)
                     .slice(0, 5)
                     .map((pred) => ({
-                        name: pred.class,
+                        name: canonicalizeFoodLabel(pred.class),
                         confidence: pred.score,
                     }));
 
-                const objects: DetectedObject[] = predictions
+                const objects: DetectedObject[] = resolveProduceConfusions(resolveAppleTomatoConflicts(predictions
                     .filter(pred => {
                         const normalizedClass = normalizeCocoClassName(pred.class, pred.score, predictions);
-                        const isFood = FOOD_KEYWORDS.has(normalizedClass);
+                        const isFood = isFoodLabel(normalizedClass);
                         const relaxedConfidence = LOW_CONF_PRODUCE_CLASSES.has(normalizedClass) ? 0.15 : minConfidence;
                         const meetsConfidence = pred.score >= relaxedConfidence;
                         return isFood && meetsConfidence;
@@ -518,7 +801,7 @@ export function useEdgeVision(options: UseEdgeVisionOptions = {}) {
                         name: normalizeCocoClassName(pred.class, pred.score, predictions),
                         confidence: pred.score,
                         bbox: pred.bbox as [number, number, number, number],
-                    }));
+                    })), imageElement), imageElement);
 
                 const processingTime = Math.round(performance.now() - startTime);
 

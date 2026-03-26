@@ -1,7 +1,7 @@
 # 🍳 Fooxchange — AI-Powered Food Exchange Platform
 
 > **Production-grade** Next.js 16 application for community recipe sharing, powered by
-> client-side TensorFlow.js (Edge AI), semantic vector search, and OpenAI embeddings.
+> client-side TensorFlow.js (Edge AI), semantic vector search, and local Transformers embeddings.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16.1.6-black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)
@@ -73,7 +73,7 @@
 | Auth | Clerk |
 | Styling | Tailwind CSS 4 |
 | Object Detection | TensorFlow.js + COCO-SSD (client-side) |
-| Semantic Search | @xenova/transformers (Edge) / OpenAI fallback |
+| Semantic Search | @xenova/transformers (local, no paid API required) |
 | File Uploads | UploadThing |
 | Toast Notifications | Sonner |
 | Testing | Jest 30 + Testing Library |
@@ -108,7 +108,7 @@ fooxchange/
 ├── lib/
 │   ├── ai/                          ← NEW: clean AI layer
 │   │   ├── singleton.ts             # Lazy model loading (one instance)
-│   │   ├── embeddings.ts            # OpenAI / hash-fallback embeddings
+│   │   ├── embeddings.ts            # Local Transformers embeddings
 │   │   ├── recommendations.ts       # Scoring, nutrition, difficulty
 │   │   ├── index.ts                 # Barrel export
 │   │   └── __tests__/              # AI unit tests
@@ -176,8 +176,8 @@ NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL="/"
 UPLOADTHING_APP_ID="..."
 UPLOADTHING_SECRET="..."
 
-# OpenAI (optional — enables high-quality embeddings)
-# Without this key the system uses the hash-based fallback embedding.
+# OpenAI (optional — only needed if you add an OpenAI provider path)
+# Local Transformers embeddings work without this key.
 OPENAI_API_KEY="sk-..."
 
 # CORS (comma-separated allowed origins)
@@ -239,7 +239,7 @@ npm run test:coverage
 ### Before deploying
 
 - [ ] All environment variables set in hosting dashboard (never commit secrets)
-- [ ] `OPENAI_API_KEY` configured if you want semantic embeddings
+- [ ] `OPENAI_API_KEY` configured only if you explicitly enable an OpenAI embedding provider
 - [ ] `DATABASE_URL` pointing to production PostgreSQL (connection-pooled)
 - [ ] Run `npm run type-check` — zero TS errors
 - [ ] Run `npm run lint` — zero ESLint errors
@@ -277,6 +277,34 @@ npm run test:coverage
 ---
 
 ## Key Design Decisions
+
+---
+
+## Local Embedding Setup & Troubleshooting
+
+Embeddings run locally by default via Transformers.js and the MiniLM model in [lib/services/embedding-service.ts](lib/services/embedding-service.ts).
+
+### Backfill command
+
+```bash
+npm run db:seed:curation
+```
+
+This now works without `OPENAI_API_KEY`.
+
+### If local embeddings seem slow on first run
+
+- First run downloads model files once and caches them.
+- Subsequent runs are much faster.
+
+### If embedding generation fails
+
+- Ensure dependencies are installed: `npm install`
+- Confirm Node version is compatible with the project (`>=20`)
+- Re-run: `npm run type-check`
+- Re-run backfill: `npx tsx scripts/backfill-embeddings.ts`
+
+The embedding service includes a deterministic hash fallback, so failures should not crash the overall app flow.
 
 ### Why a model singleton? (`lib/ai/singleton.ts`)
 

@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { Difficulty } from "@prisma/client";
+import { Difficulty, Prisma } from "@prisma/client";
 
 export type RecipeCard = {
     id: string;
@@ -23,6 +23,35 @@ export type RecipeCard = {
     };
     createdAt: Date;
 };
+
+function isDatabaseUnavailable(error: unknown): boolean {
+    if (error instanceof Prisma.PrismaClientInitializationError) {
+        return true;
+    }
+
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        return error.code === "P1001";
+    }
+
+    if (error instanceof Error) {
+        return (
+            error.message.includes("Can't reach database server") ||
+            error.message.includes("ECONNREFUSED") ||
+            error.message.includes("P1001")
+        );
+    }
+
+    return false;
+}
+
+function logFeedActionError(action: string, error: unknown) {
+    if (isDatabaseUnavailable(error)) {
+        console.warn(`[feed-actions] ${action}: database unavailable, returning empty result`);
+        return;
+    }
+
+    console.error(`[feed-actions] ${action} failed:`, error);
+}
 
 export async function getRecipes(options?: {
     ingredients?: string[];
@@ -87,8 +116,8 @@ export async function getRecipes(options?: {
             })),
         }));
     } catch (error) {
-        console.error("Error fetching recipes:", error);
-        throw new Error("Failed to fetch recipes");
+        logFeedActionError("getRecipes", error);
+        return [];
     }
 }
 
@@ -154,8 +183,8 @@ export async function searchRecipesByIngredients(
             })),
         }));
     } catch (error) {
-        console.error("Error searching recipes:", error);
-        throw new Error("Failed to search recipes");
+        logFeedActionError("searchRecipesByIngredients", error);
+        return [];
     }
 }
 
@@ -203,8 +232,7 @@ export async function getTrendingRecipes(limit = 6): Promise<RecipeCard[]> {
             })),
         }));
     } catch (error) {
-        console.error("Error fetching trending recipes:", error);
-        // Return empty array instead of throwing - allows build without DB
+        logFeedActionError("getTrendingRecipes", error);
         return [];
     }
 }

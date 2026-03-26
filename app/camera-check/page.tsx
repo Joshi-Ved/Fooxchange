@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Loader2, AlertCircle, CheckCircle2, ScanSearch } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -9,6 +9,7 @@ import { useEdgeVision } from '@/lib/hooks/use-edge-vision';
 export default function CameraCheckPage() {
 	const [cameraError, setCameraError] = useState<string>('');
 	const [hasCamera, setHasCamera] = useState(false);
+	const [isStartingCamera, setIsStartingCamera] = useState(false);
 	const [lastResult, setLastResult] = useState<{
 		processingTime: number;
 		rawCount: number;
@@ -19,6 +20,7 @@ export default function CameraCheckPage() {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const streamRef = useRef<MediaStream | null>(null);
+	const startAttemptRef = useRef(0);
 
 	const {
 		isLoading,
@@ -33,37 +35,58 @@ export default function CameraCheckPage() {
 	} = useEdgeVision({ minConfidence: 0.2 });
 
 	const startCamera = useCallback(async () => {
+		if (isStartingCamera) return;
 		setCameraError('');
+		const attemptId = Date.now();
+		startAttemptRef.current = attemptId;
 		try {
+			setIsStartingCamera(true);
 			if (!navigator.mediaDevices?.getUserMedia) {
 				setCameraError('Camera API is unavailable on this origin. Use localhost or HTTPS.');
 				return;
 			}
 
+			if (streamRef.current) {
+				streamRef.current.getTracks().forEach((track) => track.stop());
+				streamRef.current = null;
+			}
+
 			let stream: MediaStream;
 			try {
 				stream = await navigator.mediaDevices.getUserMedia({
-					video: {
-						facingMode: { ideal: 'environment' },
-						width: { ideal: 1280 },
-						height: { ideal: 720 },
-					},
+					audio: false,
+					video: { width: { ideal: 1280 }, height: { ideal: 720 } },
 				});
 			} catch {
 				stream = await navigator.mediaDevices.getUserMedia({ video: true });
 			}
 
 			if (videoRef.current) {
-				videoRef.current.srcObject = stream;
+				const video = videoRef.current;
+				video.srcObject = stream;
 				streamRef.current = stream;
-				await videoRef.current.play();
+				video.muted = true;
+				video.autoplay = true;
+				video.playsInline = true;
+				video.setAttribute('playsinline', 'true');
+				video.setAttribute('muted', 'true');
+
+				await video.play();
+				if (startAttemptRef.current !== attemptId) {
+					stream.getTracks().forEach((track) => track.stop());
+					return;
+				}
 				setHasCamera(true);
 			}
 		} catch (e) {
 			const message = e instanceof Error ? e.message : 'Failed to start camera';
 			setCameraError(message);
+		} finally {
+			if (startAttemptRef.current === attemptId) {
+				setIsStartingCamera(false);
+			}
 		}
-	}, []);
+	}, [isStartingCamera]);
 
 	const stopCamera = useCallback(() => {
 		streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -71,8 +94,14 @@ export default function CameraCheckPage() {
 		if (videoRef.current) {
 			videoRef.current.srcObject = null;
 		}
+		setIsStartingCamera(false);
 		setHasCamera(false);
 	}, []);
+
+	useEffect(() => {
+		if (!hasCamera || isModelReady || isLoading) return;
+		loadModel();
+	}, [hasCamera, isModelReady, isLoading, loadModel]);
 
 	const runSingleCheck = useCallback(async () => {
 		if (!videoRef.current || !canvasRef.current) return;
@@ -132,9 +161,9 @@ export default function CameraCheckPage() {
 					</div>
 
 					<div className="flex flex-wrap gap-2">
-						<Button onClick={startCamera} disabled={hasCamera}>
+						<Button onClick={startCamera} disabled={hasCamera || isStartingCamera}>
 							<Camera className="w-4 h-4 mr-2" />
-							Enable Camera
+							{isStartingCamera ? 'Starting Camera...' : 'Enable Camera'}
 						</Button>
 						<Button variant="outline" onClick={stopCamera} disabled={!hasCamera}>
 							Stop Camera

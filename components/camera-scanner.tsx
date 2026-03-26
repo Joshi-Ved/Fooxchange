@@ -75,6 +75,8 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     const [isScanning, setIsScanning] = useState(false);
     const [isContinuousMode, setIsContinuousMode] = useState(false);
     const [hasPermission, setHasPermission] = useState(false);
+    const [isVideoReady, setIsVideoReady] = useState(false);
+    const [isStartingCamera, setIsStartingCamera] = useState(false);
     const [error, setError] = useState<string>('');
     const [detectedItems, setDetectedItems] = useState<DetectedIngredient[]>([]);
     const [rawTopPredictions, setRawTopPredictions] = useState<Array<{ name: string; confidence: number }>>([]);
@@ -94,6 +96,8 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     const continuousRef = useRef(false);
     const isDetectingRef = useRef(false);
     const rafIdRef = useRef<number | null>(null);
+    const startAttemptRef = useRef(0);
+    const autoScanTriggeredRef = useRef(false);
     const autoConfirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastUiUpdateRef = useRef(0);
     const fpsCounterRef = useRef({ frames: 0, lastTime: Date.now() });
@@ -109,7 +113,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         error: modelError,
         loadModel,
         detect,
-    } = useEdgeVision({ minConfidence: 0.25 });
+    } = useEdgeVision({ minConfidence: 0.35 });
 
     // Keep refs in sync with latest function references
     useEffect(() => {
@@ -250,14 +254,31 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
 
     // Start camera
     const startCamera = useCallback(async () => {
+        if (isStartingCamera) return;
         console.log('[CameraScanner] startCamera called');
         if (isSupported === false) {
             setError('Your device doesn\'t support AI scanning. This feature requires WebGL and WebAssembly.');
             return;
         }
 
+        const attemptId = Date.now();
+        startAttemptRef.current = attemptId;
+
         try {
+            setIsStartingCamera(true);
             setError('');
+            setDetectedItems([]);
+            setRawTopPredictions([]);
+            setRawCount(0);
+            setShowSuggestions(false);
+            setRecipeSuggestions([]);
+            setIsVideoReady(false);
+            autoScanTriggeredRef.current = false;
+
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach((track) => track.stop());
+                streamRef.current = null;
+            }
             // Check if mediaDevices API is available (requires HTTPS or localhost)
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 setError(
@@ -267,25 +288,27 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                 return;
             }
 
-            const preferredConstraints: MediaStreamConstraints = {
+            // Use broad default constraints first for maximum compatibility.
+            const defaultConstraints: MediaStreamConstraints = {
+                audio: false,
                 video: {
-                    facingMode: { ideal: 'environment' },
                     width: { ideal: 1280 },
                     height: { ideal: 720 },
                 },
             };
 
-            const fallbackConstraints: MediaStreamConstraints = {
-                video: true,
-            };
+            let stream = await navigator.mediaDevices.getUserMedia(defaultConstraints);
 
-            let stream: MediaStream;
+            // Optional best-effort tweak: prefer back camera where supported.
             try {
-                stream = await navigator.mediaDevices.getUserMedia(preferredConstraints);
-            } catch (primaryErr) {
-                // Desktop/laptop webcams often don't satisfy environment-facing constraints.
-                stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
-                console.warn('[CameraScanner] Falling back to default camera constraints:', primaryErr);
+                const track = stream.getVideoTracks()[0];
+                if (track && typeof track.applyConstraints === 'function') {
+                    await track.applyConstraints({
+                        facingMode: { ideal: 'environment' },
+                    });
+                }
+            } catch (constraintErr) {
+                console.warn('[CameraScanner] Could not apply environment-facing preference:', constraintErr);
             }
 
             console.log('[CameraScanner] Stream obtained, video ref exists:', !!videoRef.current);
@@ -297,35 +320,76 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                 return;
             }
 
-            videoRef.current.srcObject = stream;
+            const video = videoRef.current;
+            video.srcObject = stream;
             streamRef.current = stream;
-            videoRef.current.muted = true;
+            video.muted = true;
+            video.autoplay = true;
+            video.playsInline = true;
+            video.setAttribute('playsinline', 'true');
+            video.setAttribute('muted', 'true');
 
-            // Ensure metadata is ready before enabling scan controls.
-            await new Promise<void>((resolve) => {
-                const video = videoRef.current;
-                if (!video) {
-                    resolve();
-                    return;
-                }
+            // Reveal the video element immediately once a stream is attached.
+            setHasPermission(true);
 
-                if (video.readyState >= 1) {
-                    resolve();
-                    return;
-                }
+            const waitForReady = new Promise<void>((resolve, reject) => {
+                const timeoutMs = 5000;
+                const eventNames: Array<keyof HTMLMediaElementEventMap> = ['loadedmetadata', 'loadeddata', 'canplay', 'playing'];
+                const timer = window.setTimeout(() => {
+                    cleanup();
+                    reject(new Error('Timed out waiting for camera preview to start'));
+                }, timeoutMs);
 
-                const onLoaded = () => {
-                    video.removeEventListener('loadedmetadata', onLoaded);
-                    resolve();
+                const checkReady = () => {
+                    if (!videoRef.current) return;
+                    if (videoRef.current.readyState >= 2 && videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
+                        cleanup();
+                        resolve();
+                    }
                 };
 
-                video.addEventListener('loadedmetadata', onLoaded);
+                // Some browsers keep readyState stale for a moment. Poll briefly as backup.
+                const poll = window.setInterval(checkReady, 120);
+
+                const cleanup = () => {
+                    window.clearTimeout(timer);
+                    window.clearInterval(poll);
+                    eventNames.forEach((name) => video.removeEventListener(name, checkReady));
+                };
+
+                eventNames.forEach((name) => video.addEventListener(name, checkReady));
+                checkReady();
             });
 
             try {
-                await videoRef.current.play();
+                await video.play();
+                if (startAttemptRef.current !== attemptId) {
+                    stream.getTracks().forEach((track) => track.stop());
+                    return;
+                }
+                await waitForReady;
+
+                // Final guard: ensure there is an active video track.
+                const track = stream.getVideoTracks()[0];
+                if (!track || track.readyState !== 'live') {
+                    throw new Error('Camera track is not live. Please close other apps using the camera and retry.');
+                }
+
+                setIsVideoReady(true);
                 console.log('[CameraScanner] Video playing successfully');
             } catch (playErr) {
+                const activeTrack = stream.getVideoTracks()[0];
+                // Some browsers delay metadata events but still provide a live stream.
+                if (activeTrack && activeTrack.readyState === 'live') {
+                    console.warn('[CameraScanner] Proceeding with live track fallback:', playErr);
+                    setIsVideoReady(true);
+                    return;
+                }
+
+                if (startAttemptRef.current !== attemptId) {
+                    return;
+                }
+
                 console.warn('[CameraScanner] Failed to start video playback:', playErr);
                 setError(
                     'Camera opened, but video preview failed to start. Tap "Try Again" and close other apps using the camera.'
@@ -335,12 +399,12 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                     videoRef.current.srcObject = null;
                 }
                 streamRef.current = null;
+                setHasPermission(false);
+                setIsVideoReady(false);
                 return;
             }
 
-            // SET PERMISSION OUTSIDE THE IF BLOCK - THIS IS THE FIX!
-            console.log('[CameraScanner] Setting hasPermission to true');
-            setHasPermission(true);
+            console.log('[CameraScanner] Camera preview is live');
         } catch (err: unknown) {
             console.error('Camera access error:', err);
             const domErr = err as DOMException;
@@ -358,8 +422,12 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             } else {
                 setError('Failed to access camera: ' + (domErr.message || 'Unknown error'));
             }
+        } finally {
+            if (startAttemptRef.current === attemptId) {
+                setIsStartingCamera(false);
+            }
         }
-    }, [isSupported]);
+    }, [isSupported, isStartingCamera]);
 
     // Stop camera
     const stopCamera = useCallback(() => {
@@ -381,6 +449,8 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         if (videoRef.current) {
             videoRef.current.srcObject = null;
         }
+        setIsVideoReady(false);
+        setIsStartingCamera(false);
         setHasPermission(false);
     }, []);
 
@@ -397,6 +467,9 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             const context = canvas.getContext('2d');
 
             if (!context) throw new Error('Canvas context not available');
+            if (video.videoWidth === 0 || video.videoHeight === 0) {
+                throw new Error('Camera preview is not ready yet. Please wait a moment and retry.');
+            }
 
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
@@ -446,6 +519,23 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         }
     }, [onIngredientsDetected]);
 
+    // Auto-run one scan when camera + model become ready, so users immediately see detection.
+    useEffect(() => {
+        if (!hasPermission || !isVideoReady || modelLoading || isContinuousMode || isScanning || detectedItems.length > 0) {
+            return;
+        }
+        if (autoScanTriggeredRef.current) {
+            return;
+        }
+
+        autoScanTriggeredRef.current = true;
+        const timer = window.setTimeout(() => {
+            captureAndAnalyze();
+        }, 650);
+
+        return () => window.clearTimeout(timer);
+    }, [hasPermission, isVideoReady, modelLoading, isContinuousMode, isScanning, detectedItems.length, captureAndAnalyze]);
+
     // Continuous detection mode (real-time YOLO-like scanning)
     const runContinuousDetection = useCallback(async () => {
         if (!continuousRef.current || !videoRef.current || !canvasRef.current) return;
@@ -460,6 +550,9 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             const canvas = canvasRef.current;
             const context = canvas.getContext('2d');
             if (!context) return;
+            if (video.videoWidth === 0 || video.videoHeight === 0) {
+                return;
+            }
 
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
@@ -690,7 +783,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                                     All processing happens on your device - no data is sent to servers.
                                 </p>
                                 <Button onClick={startCamera} className="w-full">
-                                    Enable Camera
+                                    {isStartingCamera ? 'Starting Camera...' : 'Enable Camera'}
                                 </Button>
                             </>
                         )}
@@ -733,6 +826,15 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                                     <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-primary" />
                                     <p className="text-sm font-medium">Loading AI model...</p>
                                     <p className="text-xs text-muted-foreground mt-2">{loadProgress}%</p>
+                                </Card>
+                            </div>
+                        )}
+
+                        {/* Camera bootstrap hint (non-blocking) */}
+                        {!isVideoReady && !modelLoading && (
+                            <div className="absolute top-20 right-4 z-20 pointer-events-none">
+                                <Card className="px-3 py-2 text-center bg-black/60 border-white/10">
+                                    <p className="text-xs text-white/90">Starting live camera feed...</p>
                                 </Card>
                             </div>
                         )}
@@ -806,6 +908,14 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
 
                                 {/* Action Buttons */}
                                 <div className="flex-shrink-0 border-t border-white/10 p-4 space-y-2">
+                                    <Button
+                                        size="sm"
+                                        className="w-full bg-green-600 hover:bg-green-700"
+                                        onClick={confirmDetections}
+                                    >
+                                        <CheckCircle className="mr-2 h-4 w-4" />
+                                        Use These Ingredients
+                                    </Button>
                                     <Button
                                         size="sm"
                                         className="w-full bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600"

@@ -19,7 +19,8 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "db:seed": "node scripts/seed-indian-recipes.js"
+    "db:seed": "node scripts/seed-indian-recipes.js",
+    "db:seed:curation": "node scripts/seed-indian-recipes.js && tsx scripts/backfill-embeddings.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.37.1",

@@ -9,6 +9,15 @@ import yaml
 
 
 IMAGE_SUFFIXES = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+NEGATIVE_FOLDER_MARKERS = (
+    'non_food',
+    'non-food',
+    'negative',
+    'negatives',
+    'background',
+    'distractor',
+    'noise',
+)
 IGNORED_LABEL_PREFIXES = (
     'archive',
     'train',
@@ -259,6 +268,34 @@ def iter_images(root: Path):
             yield path
 
 
+def is_negative_image(image_path: Path, root: Path) -> bool:
+    relative_parts = image_path.relative_to(root).parts[:-1]
+    for part in relative_parts:
+        normalized = normalize_label(part)
+        if any(marker in normalized for marker in NEGATIVE_FOLDER_MARKERS):
+            return True
+    return False
+
+
+def load_existing_yolo_label(image_path: Path) -> list[str] | None:
+    label_path = image_path.with_suffix('.txt')
+    if not label_path.exists():
+        return None
+
+    lines: list[str] = []
+    with open(label_path, 'r', encoding='utf-8') as handle:
+        for raw in handle:
+            stripped = raw.strip()
+            if not stripped:
+                continue
+            parts = stripped.split()
+            if len(parts) != 5:
+                continue
+            lines.append(stripped)
+
+    return lines
+
+
 def split_items(items: list[Path], val_frac: float, test_frac: float):
     total = len(items)
     n_test = int(total * test_frac)
@@ -291,9 +328,14 @@ def prepare_dataset(
     allowed_classes = set(allowed_classes_list) if allowed_classes_list else None
 
     grouped_images: dict[str, list[Path]] = defaultdict(list)
+    negative_images: list[Path] = []
     unresolved_images: list[Path] = []
 
     for image_path in iter_images(src):
+        if is_negative_image(image_path, src):
+            negative_images.append(image_path)
+            continue
+
         resolved_label = None
         for candidate in extract_candidates(image_path, src):
             resolved_label = resolve_label(candidate, allowed_classes)
@@ -335,6 +377,12 @@ def prepare_dataset(
         for split_name, split_items_list in split_items(image_paths, val_frac, test_frac).items():
             split_buckets[split_name].extend((path, class_name) for path in split_items_list)
 
+    if negative_images:
+        random.shuffle(negative_images)
+        negative_splits = split_items(negative_images, val_frac, test_frac)
+        for split_name, split_items_list in negative_splits.items():
+            split_buckets[split_name].extend((path, None) for path in split_items_list)
+
     for split_name in split_buckets:
         random.shuffle(split_buckets[split_name])
         (out / split_name / 'images').mkdir(parents=True, exist_ok=True)
@@ -343,24 +391,47 @@ def prepare_dataset(
     copied_counts = Counter()
     for split_name, items in split_buckets.items():
         for src_path, class_name in items:
-            unique_name = f"{class_name}_{src_path.stem}{src_path.suffix.lower()}"
-            unique_stem = f"{class_name}_{src_path.stem}"
+            label_prefix = class_name or 'negative'
+            unique_name = f"{label_prefix}_{src_path.stem}{src_path.suffix.lower()}"
+            unique_stem = f"{label_prefix}_{src_path.stem}"
             dst_img = out / split_name / 'images' / unique_name
             suffix_index = 1
             while dst_img.exists():
-                unique_name = f"{class_name}_{src_path.stem}_{suffix_index}{src_path.suffix.lower()}"
-                unique_stem = f"{class_name}_{src_path.stem}_{suffix_index}"
+                unique_name = f"{label_prefix}_{src_path.stem}_{suffix_index}{src_path.suffix.lower()}"
+                unique_stem = f"{label_prefix}_{src_path.stem}_{suffix_index}"
                 dst_img = out / split_name / 'images' / unique_name
                 suffix_index += 1
 
             shutil.copyfile(src_path, dst_img)
 
             label_path = out / split_name / 'labels' / f'{unique_stem}.txt'
-            cls_idx = class_to_idx[class_name]
             with open(label_path, 'w', encoding='utf-8') as handle:
-                handle.write(f"{cls_idx} 0.5 0.5 0.9 0.9\n")
+                if class_name is None:
+                    # Empty label file = explicit background/negative sample.
+                    pass
+                else:
+                    cls_idx = class_to_idx[class_name]
+                    existing_lines = load_existing_yolo_label(src_path)
+                    if existing_lines:
+                        remapped_lines: list[str] = []
+                        for raw_line in existing_lines:
+                            parts = raw_line.split()
+                            if len(parts) != 5:
+                                continue
+                            remapped_lines.append(
+                                f"{cls_idx} {parts[1]} {parts[2]} {parts[3]} {parts[4]}"
+                            )
 
-            copied_counts[class_name] += 1
+                        if remapped_lines:
+                            handle.write('\n'.join(remapped_lines) + '\n')
+                        else:
+                            handle.write(f"{cls_idx} 0.5 0.5 0.9 0.9\n")
+                    else:
+                        # Fallback for classification-only datasets lacking box labels.
+                        handle.write(f"{cls_idx} 0.5 0.5 0.9 0.9\n")
+
+            if class_name is not None:
+                copied_counts[class_name] += 1
 
     with open(out / 'classes.txt', 'w', encoding='utf-8') as handle:
         for class_name in class_names:
@@ -388,6 +459,7 @@ names:
         f"Train/Val/Test sizes: "
         f"{len(split_buckets['train'])}/{len(split_buckets['val'])}/{len(split_buckets['test'])}"
     )
+    print(f"Background/negative images included: {len(negative_images)}")
     print(f"Unresolved images skipped: {len(unresolved_images)}")
     if unresolved_preview:
         print(f"Unresolved sample: {unresolved_preview}")

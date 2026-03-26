@@ -139,12 +139,9 @@ async function backfillRecipeEmbeddings() {
 
 async function main() {
     console.log('🚀 Starting embedding backfill process...\n');
-
-    // Check if OpenAI API key is configured
-    if (!process.env.OPENAI_API_KEY) {
-        console.error('❌ ERROR: OPENAI_API_KEY environment variable is not set');
-        console.error('Please add your OpenAI API key to the .env file');
-        process.exit(1);
+    console.log('🧠 Using local Transformers embeddings (Xenova/all-MiniLM-L6-v2)');
+    if (process.env.OPENAI_API_KEY) {
+        console.log('ℹ️ OPENAI_API_KEY detected, but local embeddings remain the default for this script.');
     }
 
     try {
