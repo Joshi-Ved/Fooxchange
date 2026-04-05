@@ -15,13 +15,11 @@ import { db } from '@/lib/db';
 import { z } from 'zod';
 import {
     checkRateLimit,
-    RateLimitPresets,
     getClientIdentifier,
     rateLimitExceededResponse,
 } from '@/lib/middleware/rate-limit';
 import {
     handleApiError,
-    authError,
     validationError,
     successResponse,
 } from '@/lib/utils/error-handling';
@@ -105,11 +103,8 @@ async function resolveIngredientIds(detectedNames: string[]): Promise<string[]> 
 // ── Handler ───────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
     try {
-        // 1. Auth
+        // 1. Optional auth
         const { userId } = await auth();
-        if (!userId) {
-            return authError('Please sign in to get recipe suggestions');
-        }
 
         // 2. Rate limit (camera vision is expensive – 20 req / min)
         const identifier = getClientIdentifier(req, userId);

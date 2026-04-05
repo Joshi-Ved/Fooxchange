@@ -28,6 +28,7 @@ Usage:
 import argparse
 import csv
 import json
+import math
 import shutil
 import sys
 from pathlib import Path
@@ -144,6 +145,125 @@ def read_training_metrics_csv(results_csv: Path) -> dict[str, float] | None:
     return metrics
 
 
+def read_float(row: dict[str, str], key: str) -> float:
+    try:
+        return float(row.get(key, "nan"))
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def analyze_fit_diagnostics(results_csv: Path) -> dict[str, float | str] | None:
+    """Estimate fitting health from train/val losses and mAP trend."""
+    if not results_csv.exists():
+        return None
+
+    with open(results_csv, "r", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    if not rows:
+        return None
+
+    last = rows[-1]
+    train_total = (
+        read_float(last, "train/box_loss")
+        + read_float(last, "train/cls_loss")
+        + read_float(last, "train/dfl_loss")
+    )
+    val_total = (
+        read_float(last, "val/box_loss")
+        + read_float(last, "val/cls_loss")
+        + read_float(last, "val/dfl_loss")
+    )
+    map50_final = read_float(last, "metrics/mAP50(B)")
+
+    map50_values = [read_float(r, "metrics/mAP50(B)") for r in rows]
+    map50_values = [v for v in map50_values if not math.isnan(v)]
+    map50_best = max(map50_values) if map50_values else float("nan")
+
+    recent = map50_values[-3:] if len(map50_values) >= 3 else map50_values
+    previous = map50_values[-6:-3] if len(map50_values) >= 6 else map50_values[:-len(recent)]
+    recent_mean = sum(recent) / len(recent) if recent else float("nan")
+    previous_mean = sum(previous) / len(previous) if previous else recent_mean
+    map50_trend = recent_mean - previous_mean if not math.isnan(previous_mean) else 0.0
+
+    loss_gap_ratio = val_total / max(train_total, 1e-9)
+    status = "good_fit"
+    if loss_gap_ratio > 1.45 and map50_trend < 0:
+        status = "overfitting_risk"
+    elif map50_final < 0.35 and loss_gap_ratio < 1.25:
+        status = "underfitting_risk"
+
+    return {
+        "status": status,
+        "train_total_loss": train_total,
+        "val_total_loss": val_total,
+        "loss_gap_ratio": loss_gap_ratio,
+        "map50_final": map50_final,
+        "map50_best": map50_best,
+        "map50_recent_trend": map50_trend,
+    }
+
+
+def read_dataset_test_entry(data_yaml: Path) -> str | None:
+    try:
+        import yaml
+    except ImportError:
+        sys.exit("❌  PyYAML not installed. Run: pip install pyyaml")
+
+    with open(data_yaml, "r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+
+    test_entry = data.get("test")
+    if not test_entry:
+        return None
+    return str(test_entry)
+
+
+def evaluate_on_test_split(
+    weights: Path,
+    data_yaml: Path,
+    imgsz: int,
+    batch: int,
+    device: str,
+    workers: int,
+) -> dict[str, float] | None:
+    test_entry = read_dataset_test_entry(data_yaml)
+    if not test_entry:
+        print("\n⚠️  dataset.yaml has no test split configured; skipping test evaluation.")
+        return None
+
+    from ultralytics import YOLO
+
+    print("\n🧪  Running final evaluation on test split …")
+    model = YOLO(str(weights))
+    results = model.val(
+        data=str(data_yaml),
+        split="test",
+        imgsz=imgsz,
+        batch=batch,
+        device=device if device else None,
+        workers=workers,
+        verbose=True,
+    )
+
+    box = getattr(results, "box", None)
+    test_metrics = {
+        "test/mAP50": float(getattr(box, "map50", math.nan)) if box is not None else math.nan,
+        "test/mAP50-95": float(getattr(box, "map", math.nan)) if box is not None else math.nan,
+        "test/precision": float(getattr(box, "mp", math.nan)) if box is not None else math.nan,
+        "test/recall": float(getattr(box, "mr", math.nan)) if box is not None else math.nan,
+    }
+
+    print(
+        "\n📊 Test metrics summary:\n"
+        f"    mAP50     : {test_metrics['test/mAP50']:.4f}\n"
+        f"    mAP50-95  : {test_metrics['test/mAP50-95']:.4f}\n"
+        f"    Precision : {test_metrics['test/precision']:.4f}\n"
+        f"    Recall    : {test_metrics['test/recall']:.4f}"
+    )
+    return test_metrics
+
+
 def infer_manifest_model_name(weights_arg: str) -> str:
     stem = Path(weights_arg).name.lower()
     if "yolov8s" in stem:
@@ -239,6 +359,7 @@ def main():
     parser.add_argument("--workers",  type=int, default=4,     help="DataLoader workers")
     parser.add_argument("--patience", type=int, default=20,    help="Early-stop patience (epochs)")
     parser.add_argument("--lr0",      type=float, default=0.01, help="Initial learning rate")
+    parser.add_argument("--seed",     type=int, default=42,     help="Random seed for reproducible training")
 
     # Logging
     parser.add_argument("--project", default="runs/detect", help="Output project dir")
@@ -279,6 +400,16 @@ def main():
         type=float,
         default=0.35,
         help="Minimum mAP50 required to pass quality gate before deployment copy",
+    )
+    parser.add_argument(
+        "--skip-test",
+        action="store_true",
+        help="Skip final evaluation on test split after training",
+    )
+    parser.add_argument(
+        "--skip-web-copy",
+        action="store_true",
+        help="Skip copying exported model to public/models (useful for Colab-only runs)",
     )
 
     args = parser.parse_args()
@@ -334,6 +465,8 @@ def main():
             workers=args.workers,
             patience=args.patience,
             lr0=args.lr0,
+            seed=args.seed,
+            deterministic=True,
             project=str(project_dir),
             name=args.name,
             resume=args.resume,
@@ -378,6 +511,37 @@ def main():
                     "Model not suitable for deployment yet."
                 )
 
+        diagnostics = analyze_fit_diagnostics(results_csv)
+        if diagnostics is not None:
+            print(
+                "\n🧠 Fit diagnostics:\n"
+                f"    Status         : {diagnostics['status']}\n"
+                f"    Train total    : {diagnostics['train_total_loss']:.4f}\n"
+                f"    Val total      : {diagnostics['val_total_loss']:.4f}\n"
+                f"    Val/Train gap  : {diagnostics['loss_gap_ratio']:.4f}\n"
+                f"    mAP50 trend    : {diagnostics['map50_recent_trend']:.4f}"
+            )
+
+            diagnostics_out = project_dir / args.name / "fit_diagnostics.json"
+            with open(diagnostics_out, "w", encoding="utf-8") as handle:
+                json.dump(diagnostics, handle, indent=2)
+            print(f"📝  Fit diagnostics json: {diagnostics_out}")
+
+        if not args.skip_test:
+            test_metrics = evaluate_on_test_split(
+                weights=weights_path,
+                data_yaml=data_yaml,
+                imgsz=args.imgsz,
+                batch=args.batch,
+                device=args.device,
+                workers=args.workers,
+            )
+            if test_metrics is not None:
+                metrics_out = project_dir / args.name / "test_metrics.json"
+                with open(metrics_out, "w", encoding="utf-8") as handle:
+                    json.dump(test_metrics, handle, indent=2)
+                print(f"📝  Test metrics json: {metrics_out}")
+
     # ── Export ────────────────────────────────────────────────────────────────
     if not weights_path.exists():
         print(f"⚠️  best.pt not found at {weights_path}; using last.pt")
@@ -394,7 +558,10 @@ def main():
     manifest_path = build_class_manifest(manifest_source, temp_manifest_dir, model_name)
 
     # ── Copy to public/ for the web app ──────────────────────────────────────
-    copy_to_public(onnx_path, manifest_path)
+    if args.skip_web_copy:
+        print("\nℹ️  Skipping copy to public/models (--skip-web-copy enabled).")
+    else:
+        copy_to_public(onnx_path, manifest_path)
 
     print("\n🎉  Done! Model is ready to use in the camera scanner.")
     print("    Run the Next.js dev server and open the camera scanner to test.")

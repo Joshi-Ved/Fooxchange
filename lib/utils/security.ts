@@ -91,7 +91,7 @@ export function addSecurityHeaders(response: NextResponse): NextResponse {
     // Permissions Policy
     headers.set(
         'Permissions-Policy',
-        'camera=(self), microphone=(), geolocation=(), payment=()'
+        'camera=(self), microphone=(self), geolocation=(), payment=()'
     );
 
     return response;

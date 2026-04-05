@@ -72,3 +72,125 @@ yolov8n.pt
 # keep placeholder files but ignore generated model binaries
 !public/models/**/.gitkeep
 !public/uploads/.gitkeep
+
+
+TRAIN
+import argparse
+import csv
+import json
+import shutil
+import sys
+from pathlib import Path
+
+def require_ultralytics():
+    try:
+        from ultralytics import YOLO
+    except ImportError:
+        sys.exit("❌ Ultralytics not installed. Run: pip install ultralytics")
+
+def save_for_future_tasks(weights_path, project_root):
+    """Saves the best model to a dedicated permanent directory."""
+    permanent_dir = project_root / "models" / "final_food_model"
+    permanent_dir.mkdir(parents=True, exist_ok=True)
+    
+    target_path = permanent_dir / "best_food_model.pt"
+    shutil.copy2(weights_path, target_path)
+    print(f"💾 Model saved for future use at: {target_path}")
+    return target_path
+
+def export_to_onnx(weights: Path, imgsz: int) -> Path:
+    from ultralytics import YOLO
+    print(f"\n📦 Exporting {weights} → ONNX …")
+    model = YOLO(str(weights))
+    # Note: imgsz must match training size for best browser performance
+    model.export(format="onnx", imgsz=imgsz, simplify=True, opset=17)
+    return weights.with_suffix(".onnx")
+
+def main():
+    parser = argparse.ArgumentParser(description="Resource-Optimized YOLOv8 Training")
+    parser.add_argument("--data", default="training/yolo_dataset/dataset.yaml")
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--imgsz", type=int, default=416) # 416 is better for 16GB RAM laptops
+    parser.add_argument("--batch", type=int, default=4)   # Keeps RAM usage low
+    parser.add_argument("--workers", type=int, default=1) # Prevents 100% SSD spikes
+    parser.add_argument("--weights", default="yolov8s.pt")
+    parser.add_argument("--name", default="food_yolo_optimized")
+    
+    args = parser.parse_args()
+    require_ultralytics()
+    from ultralytics import YOLO
+
+    project_root = Path(__file__).parent.parent
+    
+    # 1. Initialize Model
+    model = YOLO(args.weights)
+
+    # 2. Start Optimized Training
+    # We use 'amp=True' for mixed precision and low workers to save SSD/RAM
+    results = model.train(
+        data=args.data,
+        epochs=args.epochs,
+        batch=args.batch,       # Small batch = low RAM
+        imgsz=args.imgsz,       # Small image = low RAM
+        workers=args.workers,   # Single worker = stable SSD
+        device=0 if sys.platform != 'darwin' else 'cpu', # Use GPU if available
+        # --- Resource Guards ---
+        cache=False,            # DO NOT cache to RAM (it will exceed 16GB)
+        amp=True,               # Automatic Mixed Precision (saves memory)
+        # --- Augmentations ---
+        mosaic=1.0,
+        close_mosaic=10,
+        # --- Output ---
+        project="runs/detect",
+        name=args.name,
+        exist_ok=True
+    )
+
+    # 3. Handle Outputs
+    best_weights = Path(f"runs/detect/{args.name}/weights/best.pt")
+    
+    if best_weights.exists():
+        # Export for Web App
+        onnx_path = export_to_onnx(best_weights, args.imgsz)
+        
+        # Save to permanent storage for future tasks
+        perm_weights = save_for_future_tasks(best_weights, project_root)
+        
+        print("\n🚀 Training Complete!")
+        print(f"Check {perm_weights} for your production-ready model.")
+    else:
+        print("❌ Training failed to produce best.pt. Check logs.")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+    SCRIPT AFTER TRAIN
+
+    from ultralytics import YOLO
+
+# 1. Load your saved model
+model = YOLO('models/final_food_model/best_food_model.pt')
+
+# 2. Run it on a new image
+results = model.predict('path/to/new_image.jpg', save=True, imgsz=416)
+
+# 3. Print what it found
+for result in results:
+    print(result.boxes) # Coordinates and class names
+
+
+    VALIDATION SCRIPT
+    from ultralytics import YOLO
+
+# 1. Load your saved model
+model = YOLO('models/final_food_model/best_food_model.pt')
+
+# 2. Run it on a new image
+results = model.predict('path/to/new_image.jpg', save=True, imgsz=416)
+
+# 3. Print what it found
+for result in results:
+    print(result.boxes) # Coordinates and class names

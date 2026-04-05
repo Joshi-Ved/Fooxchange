@@ -74,7 +74,7 @@ const nextConfig: NextConfig = {
           },
           {
             key: 'Permissions-Policy',
-            value: 'camera=(self), microphone=(), geolocation=(), payment=(), usb=(), vr=(), xr=()' // Allow camera only, block everything else
+            value: 'camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), vr=(), xr=()' // Allow camera and microphone for scanner voice mode
           },
           {
             // Content Security Policy for Edge AI (TensorFlow.js, Transformers.js)

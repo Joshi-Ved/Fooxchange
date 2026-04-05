@@ -13,11 +13,29 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Camera, X, CheckCircle, Loader2, AlertCircle, AlertTriangle, RefreshCw, Sparkles, ChefHat, Clock, ExternalLink } from 'lucide-react';
+import { Camera, X, CheckCircle, Loader2, AlertCircle, AlertTriangle, RefreshCw, Sparkles, ChefHat, Clock, ExternalLink, Mic, Volume2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { useEdgeVision, type DetectedObject } from '@/lib/hooks/use-edge-vision';
 import Link from 'next/link';
+
+type SpeechRecognitionEventLike = {
+    results: ArrayLike<ArrayLike<{ transcript: string }>>;
+};
+
+type SpeechRecognitionLike = {
+    lang: string;
+    interimResults: boolean;
+    maxAlternatives: number;
+    onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+    onerror: ((event: { error?: string }) => void) | null;
+    onend: (() => void) | null;
+    start: () => void;
+    stop: () => void;
+};
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
 
 interface DetectedIngredient {
     name: string;
@@ -88,6 +106,10 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     const [recipeSuggestions, setRecipeSuggestions] = useState<RecipeSuggestion[]>([]);
     const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
+    const [voiceQuery, setVoiceQuery] = useState('');
+    const [isVoiceSearching, setIsVoiceSearching] = useState(false);
+    const [isListening, setIsListening] = useState(false);
+    const [voiceSupported, setVoiceSupported] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -101,6 +123,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     const autoConfirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastUiUpdateRef = useRef(0);
     const fpsCounterRef = useRef({ frames: 0, lastTime: Date.now() });
+    const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
     // Refs to avoid stale closures in continuous detection loop
     const detectRef = useRef<typeof detect>(null!);
     const drawBoundingBoxesRef = useRef<typeof drawBoundingBoxes>(null!);
@@ -134,6 +157,15 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         return () => {
             document.body.style.overflow = prevOverflow;
         };
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const speechWindow = window as Window & {
+            SpeechRecognition?: SpeechRecognitionCtor;
+            webkitSpeechRecognition?: SpeechRecognitionCtor;
+        };
+        setVoiceSupported(Boolean(speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition));
     }, []);
 
     /**
@@ -683,6 +715,121 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         }
     }, [buildDetectedSearchTerms, isFetchingSuggestions]);
 
+    const queryRecipesByVoice = useCallback(async (query: string) => {
+        const text = query.trim();
+        if (!text || isVoiceSearching) return;
+
+        setIsVoiceSearching(true);
+        setShowSuggestions(true);
+        try {
+            const res = await fetch('/api/ai/voice-recommend', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    query: text,
+                    limit: 5,
+                }),
+            });
+
+            if (!res.ok) {
+                setError('Voice recipe search failed. Please try again.');
+                return;
+            }
+
+            const data = await res.json();
+            setRecipeSuggestions(data.data?.suggestions ?? []);
+
+            const extracted = (data.data?.detectedIngredients ?? []) as string[];
+            if (extracted.length > 0) {
+                setDetectedItems(
+                    extracted.slice(0, 8).map((name) => ({
+                        name,
+                        confidence: 1,
+                    }))
+                );
+            }
+        } catch (err) {
+            console.error('Voice recommendation request failed:', err);
+            setError('Voice recipe search failed. Please try again.');
+        } finally {
+            setIsVoiceSearching(false);
+        }
+    }, [isVoiceSearching]);
+
+    const startVoiceCapture = useCallback(() => {
+        if (!voiceSupported || typeof window === 'undefined') {
+            setError('Voice input is not supported in this browser.');
+            return;
+        }
+
+        const speechWindow = window as Window & {
+            SpeechRecognition?: SpeechRecognitionCtor;
+            webkitSpeechRecognition?: SpeechRecognitionCtor;
+        };
+        const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+        if (!Recognition) {
+            setError('Voice input is not supported in this browser.');
+            return;
+        }
+
+        try {
+            if (!recognitionRef.current) {
+                recognitionRef.current = new Recognition();
+            }
+
+            const recognition = recognitionRef.current;
+            recognition.lang = 'en-IN';
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+
+            recognition.onresult = (event: SpeechRecognitionEventLike) => {
+                const transcript = event.results?.[0]?.[0]?.transcript?.trim() || '';
+                if (!transcript) return;
+                setVoiceQuery(transcript);
+                queryRecipesByVoice(transcript);
+            };
+
+            recognition.onerror = () => {
+                setIsListening(false);
+                setError('Voice capture failed. Please try again.');
+            };
+
+            recognition.onend = () => {
+                setIsListening(false);
+            };
+
+            setIsListening(true);
+            recognition.start();
+        } catch (err) {
+            console.error('Unable to start voice capture:', err);
+            setIsListening(false);
+            setError('Could not start microphone. Check browser permissions.');
+        }
+    }, [queryRecipesByVoice, voiceSupported]);
+
+    const speakSuggestions = useCallback(() => {
+        if (typeof window === 'undefined' || typeof window.speechSynthesis === 'undefined') {
+            setError('Speech output is not supported in this browser.');
+            return;
+        }
+
+        if (recipeSuggestions.length === 0) {
+            setError('No recipe suggestions available to read out.');
+            return;
+        }
+
+        const top = recipeSuggestions.slice(0, 3);
+        const spokenText = top
+            .map((s, index) => `${index + 1}. ${s.recipe.title}. ${s.reason}.`)
+            .join(' ');
+
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(`Top recipe suggestions. ${spokenText}`);
+        utterance.lang = 'en-IN';
+        utterance.rate = 1;
+        window.speechSynthesis.speak(utterance);
+    }, [recipeSuggestions]);
+
     // Auto-fetch recipes when ingredients are detected (fire-and-forget)
     useEffect(() => {
         if (detectedItems.length > 0 && !showSuggestions && !isFetchingSuggestions) {
@@ -1010,6 +1157,39 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                                             </span>
                                         ))}
                                     </div>
+
+                                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2">
+                                        <Input
+                                            value={voiceQuery}
+                                            onChange={(e) => setVoiceQuery(e.target.value)}
+                                            placeholder="Speak or type: paneer, tomato, quick dinner"
+                                            className="bg-white/10 border-white/20 text-white placeholder:text-white/40"
+                                        />
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            onClick={startVoiceCapture}
+                                            disabled={isListening || isVoiceSearching || !voiceSupported}
+                                            className="whitespace-nowrap"
+                                            title={voiceSupported ? 'Start voice input' : 'Voice input not supported'}
+                                        >
+                                            <Mic className={`mr-2 h-4 w-4 ${isListening ? 'animate-pulse' : ''}`} />
+                                            {isListening ? 'Listening...' : 'Speak'}
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            onClick={() => queryRecipesByVoice(voiceQuery)}
+                                            disabled={!voiceQuery.trim() || isVoiceSearching}
+                                            className="whitespace-nowrap bg-orange-500 hover:bg-orange-600"
+                                        >
+                                            {isVoiceSearching ? (
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            ) : (
+                                                <Sparkles className="mr-2 h-4 w-4" />
+                                            )}
+                                            Ask by Voice
+                                        </Button>
+                                    </div>
                                 </div>
 
                                 {/* Recipes content */}
@@ -1093,6 +1273,15 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
 
                                 {/* Footer buttons */}
                                 <div className="flex-shrink-0 border-t border-white/10 p-4 space-y-2 bg-black/80">
+                                    <Button
+                                        className="w-full"
+                                        variant="secondary"
+                                        onClick={speakSuggestions}
+                                        disabled={recipeSuggestions.length === 0}
+                                    >
+                                        <Volume2 className="mr-2 h-4 w-4" />
+                                        Read Suggestions Aloud
+                                    </Button>
                                     <Button
                                         className="w-full"
                                         variant="outline"
