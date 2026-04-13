@@ -24,6 +24,23 @@ export type RecipeCard = {
     createdAt: Date;
 };
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs = 3500): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+            reject(new Error(`DB query timeout after ${timeoutMs}ms`));
+        }, timeoutMs);
+    });
+
+    try {
+        return await Promise.race([promise, timeoutPromise]);
+    } finally {
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+        }
+    }
+}
+
 function isDatabaseUnavailable(error: unknown): boolean {
     if (error instanceof Prisma.PrismaClientInitializationError) {
         return true;
@@ -62,7 +79,7 @@ export async function getRecipes(options?: {
     const { ingredients, difficulty, limit = 12, offset = 0 } = options || {};
 
     try {
-        const recipes = await db.recipe.findMany({
+        const recipes = await withTimeout(db.recipe.findMany({
             where: {
                 ...(difficulty && { difficulty }),
                 ...(ingredients &&
@@ -106,7 +123,7 @@ export async function getRecipes(options?: {
             },
             take: limit,
             skip: offset,
-        });
+        }));
 
         // Transform to match RecipeCard type
         return recipes.map((recipe) => ({
@@ -134,7 +151,7 @@ export async function searchRecipesByIngredients(
             i.toLowerCase().trim()
         );
 
-        const recipes = await db.recipe.findMany({
+        const recipes = await withTimeout(db.recipe.findMany({
             where: {
                 ingredients: {
                     some: {
@@ -174,7 +191,7 @@ export async function searchRecipesByIngredients(
             orderBy: {
                 createdAt: "desc",
             },
-        });
+        }));
 
         return recipes.map((recipe) => ({
             ...recipe,
@@ -195,7 +212,7 @@ export async function searchRecipesByIngredients(
  */
 export async function getTrendingRecipes(limit = 6): Promise<RecipeCard[]> {
     try {
-        const recipes = await db.recipe.findMany({
+        const recipes = await withTimeout(db.recipe.findMany({
             include: {
                 author: {
                     select: {
@@ -223,7 +240,7 @@ export async function getTrendingRecipes(limit = 6): Promise<RecipeCard[]> {
                 createdAt: "desc", // PERFORMANCE FIX: Changed from savedBy._count which was extremely slow
             },
             take: limit,
-        });
+        }));
 
         return recipes.map((recipe) => ({
             ...recipe,

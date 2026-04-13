@@ -53,47 +53,43 @@ export function Navbar({ authEnabled }: NavbarProps) {
                         <span className="text-xs text-muted-foreground">Auth not configured</span>
                     ) : (
                         <>
-                    {/* Signed Out State */}
-                    <SignedOut>
-                        <Button asChild variant="ghost" size="sm">
-                            <Link href="/sign-in">
-                                Sign In
-                            </Link>
-                        </Button>
-                        <Button
-                            asChild
-                            size="sm"
-                            className="bg-gradient-to-r from-orange-500 to-rose-500 text-white hover:from-orange-600 hover:to-rose-600"
-                        >
-                            <Link href="/sign-up">
-                                size="sm"
-                                Sign Up
-                            </Link>
-                        </Button>
-                    </SignedOut>
+                            <SignedOut>
+                                <Button asChild variant="ghost" size="sm">
+                                    <Link href="/sign-in" prefetch={false}>
+                                        Sign In
+                                    </Link>
+                                </Button>
+                                <Button
+                                    asChild
+                                    size="sm"
+                                    className="bg-gradient-to-r from-orange-500 to-rose-500 text-white hover:from-orange-600 hover:to-rose-600"
+                                >
+                                    <Link href="/sign-up" prefetch={false}>
+                                        Sign Up
+                                    </Link>
+                                </Button>
+                            </SignedOut>
 
-                    {/* Signed In State */}
-                    <SignedIn>
-                        <Button
-                            asChild
-                            size="sm"
-                            variant="default"
-                            className="hidden gap-2 bg-gradient-to-r from-orange-500 to-rose-500 text-white hover:from-orange-600 hover:to-rose-600 md:inline-flex"
-                        >
-                            <Link href="/recipes/create">
-                                size="sm"
-                                <Plus className="h-4 w-4" />
-                                Create Recipe
-                            </Link>
-                        </Button>
-                        <UserButton
-                            appearance={{
-                                elements: {
-                                    avatarBox: "h-9 w-9"
-                                }
-                            }}
-                        />
-                    </SignedIn>
+                            <SignedIn>
+                                <Button
+                                    asChild
+                                    size="sm"
+                                    variant="default"
+                                    className="hidden gap-2 bg-gradient-to-r from-orange-500 to-rose-500 text-white hover:from-orange-600 hover:to-rose-600 md:inline-flex"
+                                >
+                                    <Link href="/recipes/create">
+                                        <Plus className="h-4 w-4" />
+                                        Create Recipe
+                                    </Link>
+                                </Button>
+                                <UserButton
+                                    appearance={{
+                                        elements: {
+                                            avatarBox: "h-9 w-9"
+                                        }
+                                    }}
+                                />
+                            </SignedIn>
                         </>
                     )}
                 </div>

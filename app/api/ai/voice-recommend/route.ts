@@ -9,47 +9,19 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { z } from 'zod';
-import { db } from '@/lib/db';
-import { searchRecipesBySemantic } from '@/lib/services/search-service';
 import {
     checkRateLimit,
     getClientIdentifier,
     rateLimitExceededResponse,
 } from '@/lib/middleware/rate-limit';
-import {
-    handleApiError,
-    validationError,
-    successResponse,
-} from '@/lib/utils/error-handling';
 
 export const runtime = 'nodejs';
 
 const voiceRecommendSchema = z.object({
-    query: z.string().min(3).max(300),
+    query: z.string().min(1).max(300),
+    detectedIngredients: z.array(z.string()).optional(),
     limit: z.number().min(1).max(10).default(5),
 });
-
-function tokenize(input: string): string[] {
-    return Array.from(
-        new Set(
-            input
-                .toLowerCase()
-                .split(/[^a-z0-9]+/)
-                .map((token) => token.trim())
-                .filter((token) => token.length >= 3)
-        )
-    );
-}
-
-function buildReason(matchPercent: number, query: string): string {
-    if (matchPercent >= 75) {
-        return `Strong ingredient match for your query: "${query}"`;
-    }
-    if (matchPercent >= 45) {
-        return `Good ingredient overlap for your voice request`;
-    }
-    return 'Semantically similar to what you asked for';
-}
 
 export async function POST(req: NextRequest) {
     try {
@@ -60,6 +32,7 @@ export async function POST(req: NextRequest) {
             maxRequests: 30,
             windowSeconds: 60,
         });
+
         if (!rateLimit.success) {
             return rateLimitExceededResponse(rateLimit);
         }
@@ -67,122 +40,72 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
         const parsed = voiceRecommendSchema.safeParse(body);
         if (!parsed.success) {
-            return validationError('Invalid voice query', parsed.error.flatten());
+            return new Response(JSON.stringify({ error: 'Invalid query', details: parsed.error.flatten() }), { status: 400 });
         }
 
-        const { query, limit } = parsed.data;
-        const tokens = tokenize(query);
+        const { query, detectedIngredients = [], limit } = parsed.data;
 
-        const ingredientCandidates = await db.ingredient.findMany({
-            where: {
-                OR: [
-                    { name: { contains: query, mode: 'insensitive' } },
-                    { slug: { contains: query.replace(/\s+/g, '-'), mode: 'insensitive' } },
-                    ...tokens.map((token) => ({ name: { contains: token, mode: 'insensitive' as const } })),
-                    ...tokens.map((token) => ({ slug: { contains: token, mode: 'insensitive' as const } })),
+        // Use Groq API to generate custom recipes combining YOLO items + voice input
+        const groqApiKey = process.env.groq_api_key || process.env.GROQ_API_KEY;
+        if (!groqApiKey) {
+            return new Response(JSON.stringify({ error: 'Groq API Key missing' }), { status: 500 });
+        }
+
+        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${groqApiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'llama3-8b-8192',
+                messages: [
+                    { 
+                        role: 'system', 
+                        content: `You are an AI for Fooxchange. The user has detected ingredients: [${detectedIngredients.join(', ')}].
+Their natural language query is: "${query}".
+
+Identify any NEW food ingredients the user is mentioning.
+Return ONLY a raw JSON array of strings containing the combined ingredients (detected + new). 
+No markdown fences, no extra text.
+Example: ["carrot", "tomato", "paneer"]` 
+                    }
                 ],
-            },
-            select: { id: true, name: true },
-            take: 30,
+                temperature: 0.1,
+            })
         });
 
-        const ingredientIdSet = new Set(ingredientCandidates.map((item) => item.id));
-
-        const ingredientMatchedRecipes = await db.recipe.findMany({
-            where: ingredientIdSet.size
-                ? {
-                    ingredients: {
-                        some: {
-                            ingredientId: { in: Array.from(ingredientIdSet) },
-                        },
-                    },
-                }
-                : undefined,
-            include: {
-                ingredients: {
-                    include: {
-                        ingredient: { select: { id: true, name: true } },
-                    },
-                },
-            },
-            orderBy: { createdAt: 'desc' },
-            take: 40,
-        });
-
-        const semanticResults = await searchRecipesBySemantic(query, limit * 3, 0.5);
-
-        const merged = new Map<string, {
-            recipe: {
-                id: string;
-                title: string;
-                description: string;
-                imageUrl: string | null;
-                prepTime: number | null;
-                cookTime: number | null;
-                difficulty: string;
-            };
-            matchPercent: number;
-            reason: string;
-            score: number;
-        }>();
-
-        for (const recipe of ingredientMatchedRecipes) {
-            const total = Math.max(1, recipe.ingredients.length);
-            const matched = recipe.ingredients.filter((ri) => ingredientIdSet.has(ri.ingredient.id)).length;
-            const matchPercent = Math.round((matched / total) * 100);
-            const score = matchPercent / 100;
-
-            merged.set(recipe.id, {
-                recipe: {
-                    id: recipe.id,
-                    title: recipe.title,
-                    description: recipe.description,
-                    imageUrl: recipe.imageUrl,
-                    prepTime: recipe.prepTime,
-                    cookTime: recipe.cookTime,
-                    difficulty: recipe.difficulty,
-                },
-                matchPercent,
-                reason: buildReason(matchPercent, query),
-                score,
-            });
+        if (!groqResponse.ok) {
+            const errBody = await groqResponse.text();
+            console.error('Groq Error:', errBody);
+            return new Response(JSON.stringify({ error: 'Groq failed' }), { status: 500 });
         }
 
-        for (const item of semanticResults) {
-            const similarity = item.similarity;
-            const matchPercent = Math.round(similarity * 100);
-            const existing = merged.get(item.recipe.id);
-            if (existing && existing.score >= similarity) {
-                continue;
+        const groqData = await groqResponse.json();
+        
+        let extractedJson = groqData.choices?.[0]?.message?.content || "[]";
+        
+        // Strip markdown if it was added accidentally
+        extractedJson = extractedJson.replace(/```json/g, '').replace(/```/g, '').trim();
+
+        let extractedIngredients = [];
+        try {
+            extractedIngredients = JSON.parse(extractedJson);
+            if (!Array.isArray(extractedIngredients)) extractedIngredients = [];
+        } catch (err) {
+            console.error('Failed to parse Groq response:', extractedJson);
+            extractedIngredients = [];
+        }
+
+        return new Response(JSON.stringify({
+            data: {
+                query,
+                extractedIngredients
             }
+        }), { status: 200 });
 
-            merged.set(item.recipe.id, {
-                recipe: {
-                    id: item.recipe.id,
-                    title: item.recipe.title,
-                    description: item.recipe.description,
-                    imageUrl: item.recipe.imageUrl,
-                    prepTime: item.recipe.prepTime,
-                    cookTime: item.recipe.cookTime,
-                    difficulty: item.recipe.difficulty,
-                },
-                matchPercent,
-                reason: buildReason(matchPercent, query),
-                score: similarity,
-            });
-        }
-
-        const suggestions = Array.from(merged.values())
-            .sort((a, b) => b.score - a.score)
-            .slice(0, limit)
-            .map(({ score: _score, ...rest }) => rest);
-
-        return successResponse({
-            query,
-            suggestions,
-            detectedIngredients: ingredientCandidates.map((item) => item.name),
-        });
     } catch (error) {
-        return handleApiError(error, 'Failed to process voice recipe query');
+        console.error('Failed to process voice recipe query:', error);
+        return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 });
     }
 }

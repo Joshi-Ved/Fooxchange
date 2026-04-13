@@ -31,6 +31,18 @@ export function useServiceWorker() {
             return;
         }
 
+        const hostname = window.location.hostname;
+        const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+        if (process.env.NODE_ENV !== 'production' || isLocalhost) {
+            // Avoid stale SW behavior while developing locally.
+            navigator.serviceWorker.getRegistrations().then((registrations) => {
+                registrations.forEach((registration) => {
+                    void registration.unregister();
+                });
+            });
+            return;
+        }
+
         registerServiceWorker();
     }, []);
 
@@ -175,8 +187,6 @@ export function useNetworkStatus() {
     const [isOnline, setIsOnline] = useState(true);
 
     useEffect(() => {
-        setIsOnline(navigator.onLine);
-
         const handleOnline = () => {
             console.log('[PWA] Back online');
             setIsOnline(true);

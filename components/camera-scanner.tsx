@@ -13,7 +13,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Camera, X, CheckCircle, Loader2, AlertCircle, AlertTriangle, RefreshCw, Sparkles, ChefHat, Clock, ExternalLink, Mic, Volume2 } from 'lucide-react';
+import { Camera, X, CheckCircle, Loader2, AlertCircle, AlertTriangle, RefreshCw, Sparkles, ChefHat, Clock, ExternalLink, Mic, Volume2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -114,6 +114,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+    const uploadInputRef = useRef<HTMLInputElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const continuousRef = useRef(false);
     const isDetectingRef = useRef(false);
@@ -127,6 +128,10 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
     // Refs to avoid stale closures in continuous detection loop
     const detectRef = useRef<typeof detect>(null!);
     const drawBoundingBoxesRef = useRef<typeof drawBoundingBoxes>(null!);
+    // Ref for detectedItems to avoid stale closure in voice handler
+    const detectedItemsRef = useRef<DetectedIngredient[]>([]);
+    // Ref for voiceQuery to avoid stale closure in captureAndAnalyze
+    const voiceQueryRef = useRef<string>('');
 
     // Edge AI Vision hook
     const {
@@ -523,9 +528,67 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             }));
 
             setDetectedItems(ingredients);
+            detectedItemsRef.current = ingredients;
             setRawTopPredictions(result.rawTopPredictions);
             setRawCount(result.rawCount);
             setProcessingTime(result.processingTime);
+
+            // ── Groq Vision Failsafe ──────────────────────────────────────────
+            // COCO-SSD has only 80 classes and is often confidently wrong in
+            // kitchen scenes. Key example: carrot → "hot dog" at 92% confidence
+            // because they share an elongated shape.
+            //
+            // We trigger Groq Vision when:
+            //   a) Zero results, OR
+            //   b) All results have low confidence (<50%), OR
+            //   c) ANY detection is a "suspicious" COCO class — items that are
+            //      almost never scanned in a home kitchen but COCO latches onto.
+            const SUSPICIOUS_COCO_CLASSES = new Set([
+                'hot dog', 'sandwich', 'pizza', 'donut', 'cake',
+                'baseball bat', 'tennis racket', 'bottle', 'wine glass',
+                'cell phone', 'remote', 'keyboard', 'mouse',
+            ]);
+
+            const hasSuspiciousDetection = ingredients.some((ing) =>
+                SUSPICIOUS_COCO_CLASSES.has(ing.name.toLowerCase())
+            );
+
+            const hasLowConfidenceResults = ingredients.length === 0 ||
+                ingredients.every((ing) => ing.confidence < 0.5);
+
+            if ((hasLowConfidenceResults || hasSuspiciousDetection) && canvasRef.current) {
+                try {
+                    const canvas = canvasRef.current;
+                    const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+                    const groqRes = await fetch('/api/ai/scan-image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            imageBase64: base64,
+                            mimeType: 'image/jpeg',
+                            // Pass voice hint so Groq can factor in user's typed correction
+                            voiceHint: voiceQueryRef.current || '',
+                            limit: 5,
+                        }),
+                    });
+                    if (groqRes.ok) {
+                        const groqData = await groqRes.json();
+                        const groqIngredients = (groqData.data?.detectedIngredients ?? []) as string[];
+                        if (groqIngredients.length > 0) {
+                            const mapped: DetectedIngredient[] = groqIngredients.map((name: string) => ({
+                                name,
+                                confidence: 0.9, // Groq Vision is high-confidence
+                            }));
+                            setDetectedItems(mapped);
+                            detectedItemsRef.current = mapped;
+                            // The useEffect below will auto-call suggestRecipes()
+                        }
+                    }
+                } catch (groqErr) {
+                    console.warn('[CameraScanner] Groq Vision fallback failed:', groqErr);
+                    // Non-fatal — COCO-SSD result (even if empty) stands
+                }
+            }
 
             // Update FPS counter
             fpsCounterRef.current.frames++;
@@ -715,6 +778,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         }
     }, [buildDetectedSearchTerms, isFetchingSuggestions]);
 
+    // Use ref to avoid stale closure — always reads latest detectedItems
     const queryRecipesByVoice = useCallback(async (query: string) => {
         const text = query.trim();
         if (!text || isVoiceSearching) return;
@@ -722,31 +786,50 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         setIsVoiceSearching(true);
         setShowSuggestions(true);
         try {
+            // Use ref so we always get the current detected items (not stale closure)
+            const currentItems = detectedItemsRef.current;
+            const detectedIngredients = buildDetectedSearchTerms(currentItems);
+
             const res = await fetch('/api/ai/voice-recommend', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     query: text,
+                    detectedIngredients,
                     limit: 5,
                 }),
             });
 
             if (!res.ok) {
-                setError('Voice recipe search failed. Please try again.');
-                return;
+                const errBody = await res.json().catch(() => ({}));
+                setError(errBody?.error || 'Voice recipe search failed. Please try again.');
+                setIsVoiceSearching(false);
+                return; // Early return prevents falling through with 'finally'
             }
 
             const data = await res.json();
-            setRecipeSuggestions(data.data?.suggestions ?? []);
+            const extracted = (data.data?.extractedIngredients ?? []) as string[];
+            
+            // Merge voice-detected and camera-detected ingredients safely
+            const newItemsMap = new Map<string, DetectedIngredient>();
+            currentItems.forEach(i => newItemsMap.set(i.name.toLowerCase(), i));
+            extracted.forEach(name => {
+                const lower = name.toLowerCase();
+                if (!newItemsMap.has(lower)) newItemsMap.set(lower, { name, confidence: 1 });
+            });
+            const merged = Array.from(newItemsMap.values());
+            
+            if (merged.length > 0) {
+                setDetectedItems(merged);
+                detectedItemsRef.current = merged;
+                
+                // Yield the voice search state back before moving onto the recipe lookup state
+                setIsVoiceSearching(false);
 
-            const extracted = (data.data?.detectedIngredients ?? []) as string[];
-            if (extracted.length > 0) {
-                setDetectedItems(
-                    extracted.slice(0, 8).map((name) => ({
-                        name,
-                        confidence: 1,
-                    }))
-                );
+                // Call suggestRecipes with merged ingredients to get REAL recipes from database
+                await suggestRecipes(merged);
+            } else {
+                setRecipeSuggestions([]);
             }
         } catch (err) {
             console.error('Voice recommendation request failed:', err);
@@ -754,7 +837,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         } finally {
             setIsVoiceSearching(false);
         }
-    }, [isVoiceSearching]);
+    }, [isVoiceSearching, buildDetectedSearchTerms, suggestRecipes]);
 
     const startVoiceCapture = useCallback(() => {
         if (!voiceSupported || typeof window === 'undefined') {
@@ -830,6 +913,16 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
         window.speechSynthesis.speak(utterance);
     }, [recipeSuggestions]);
 
+    // Keep detectedItemsRef in sync
+    useEffect(() => {
+        detectedItemsRef.current = detectedItems;
+    }, [detectedItems]);
+
+    // Keep voiceQueryRef in sync
+    useEffect(() => {
+        voiceQueryRef.current = voiceQuery;
+    }, [voiceQuery]);
+
     // Auto-fetch recipes when ingredients are detected (fire-and-forget)
     useEffect(() => {
         if (detectedItems.length > 0 && !showSuggestions && !isFetchingSuggestions) {
@@ -840,6 +933,68 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
             return () => clearTimeout(timer);
         }
     }, [detectedItems, showSuggestions, isFetchingSuggestions, suggestRecipes]);
+
+    // ── Groq Vision Upload Handler ──────────────────────────────────────────
+    const handleImageUpload = useCallback(async (file: File) => {
+        if (!file || isFetchingSuggestions) return;
+        setIsFetchingSuggestions(true);
+        setShowSuggestions(true);
+        setRecipeSuggestions([]);
+        setError('');
+        try {
+            const reader = new FileReader();
+            const base64 = await new Promise<string>((resolve, reject) => {
+                reader.onload = () => resolve((reader.result as string).split(',')[1]);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+
+            const res = await fetch('/api/ai/scan-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    imageBase64: base64,
+                    mimeType: file.type || 'image/jpeg',
+                    voiceHint: voiceQuery,
+                    limit: 5,
+                }),
+            });
+
+            if (!res.ok) {
+                setError('Groq Vision analysis failed. Make sure GROQ_API_KEY is set in .env');
+                setIsFetchingSuggestions(false);
+                return;
+            }
+
+            const data = await res.json();
+            const detectedList = (data.data?.detectedIngredients ?? []) as string[];
+
+            if (detectedList.length > 0) {
+                const mapped: DetectedIngredient[] = detectedList.map((name: string) => ({
+                    name,
+                    confidence: 0.95, // AI uploaded photos have high confidence
+                }));
+                setDetectedItems(mapped);
+                detectedItemsRef.current = mapped;
+                
+                // We must yield the fetch state back so `suggestRecipes` can run normally
+                setIsFetchingSuggestions(false);
+                
+                // Get REAL recipes from database
+                await suggestRecipes(mapped);
+            } else {
+                setError('No recipes found. Try uploading a clearer photo of your ingredients.');
+                setShowSuggestions(false);
+                setIsFetchingSuggestions(false);
+            }
+        } catch (err) {
+            console.error('[Upload] Groq Vision error:', err);
+            setError('Failed to analyse uploaded image. Please try again.');
+            setIsFetchingSuggestions(false);
+        } finally {
+            if (uploadInputRef.current) uploadInputRef.current.value = '';
+        }
+    }, [isFetchingSuggestions, voiceQuery, suggestRecipes]);
 
     return (
         <div className="fixed inset-0 z-50 bg-black overflow-hidden flex flex-col">
@@ -1323,6 +1478,18 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                 )}
             </div>
 
+            {/* Hidden upload input */}
+            <input
+                ref={uploadInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleImageUpload(file);
+                }}
+            />
+
             {/* Controls - Bottom Bar */}
             {hasPermission && !modelLoading && !showSuggestions && !detectedItems.length && (
                 <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 to-black/40 p-4 flex gap-2 justify-center flex-wrap z-20">
@@ -1331,7 +1498,7 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                         size="lg"
                         onClick={captureAndAnalyze}
                         disabled={isScanning || isContinuousMode}
-                        className="shadow-lg flex-1 max-w-xs"
+                        className="shadow-lg flex-1 max-w-[160px]"
                     >
                         <Camera className="mr-2 h-4 w-4" />
                         Scan Once
@@ -1343,11 +1510,28 @@ export function CameraScanner({ onIngredientsDetected, onClose }: CameraScannerP
                         variant={isContinuousMode ? "destructive" : "secondary"}
                         onClick={toggleContinuousMode}
                         disabled={isScanning}
-                        className="shadow-lg flex-1 max-w-xs"
+                        className="shadow-lg flex-1 max-w-[160px]"
                         title={isContinuousMode ? "Stop real-time scanning" : "Start real-time scanning"}
                     >
                         <RefreshCw className={`mr-2 h-4 w-4 ${isContinuousMode ? 'animate-spin' : ''}`} />
                         {isContinuousMode ? 'Stop Live' : 'Live Scan'}
+                    </Button>
+
+                    {/* Groq Vision Upload — AI identifies food from a photo */}
+                    <Button
+                        size="lg"
+                        variant="outline"
+                        onClick={() => uploadInputRef.current?.click()}
+                        disabled={isFetchingSuggestions}
+                        className="shadow-lg flex-1 max-w-[160px] border-orange-400 text-orange-300 hover:bg-orange-500/20"
+                        title="Upload a photo and let Groq AI identify the ingredients"
+                    >
+                        {isFetchingSuggestions ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                            <Upload className="mr-2 h-4 w-4" />
+                        )}
+                        AI Upload
                     </Button>
                 </div>
             )}

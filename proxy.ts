@@ -4,6 +4,7 @@ import { NextResponse, type NextFetchEvent, type NextRequest } from 'next/server
 const CLERK_CONFIGURED = Boolean(
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY,
 )
+const SKIP_AUTH_IN_DEV = process.env.SKIP_AUTH_IN_DEV === 'true'
 
 // Define public routes that don't require authentication
 const isPublicRoute = createRouteMatcher([
@@ -15,22 +16,28 @@ const isPublicRoute = createRouteMatcher([
     '/api/(.*)', // All API routes handle their own auth internally
 ])
 
-const clerkAuthMiddleware = clerkMiddleware(async (auth, request) => {
-    const url = new URL(request.url);
+function createClerkAuthMiddleware() {
+    return clerkMiddleware(async (auth, request) => {
+        const url = new URL(request.url);
 
-    // Protect recipe creation - require authentication
-    if (url.pathname === '/recipes/create') {
-        await auth.protect();
-        return;
-    }
+        // Protect recipe creation - require authentication
+        if (url.pathname === '/recipes/create') {
+            await auth.protect();
+            return;
+        }
 
-    // Protect all other non-public routes
-    if (!isPublicRoute(request)) {
-        await auth.protect()
-    }
-})
+        // Protect all other non-public routes
+        if (!isPublicRoute(request)) {
+            await auth.protect()
+        }
+    })
+}
 
 export default function middleware(request: NextRequest, event: NextFetchEvent) {
+    if (SKIP_AUTH_IN_DEV) {
+        return NextResponse.next();
+    }
+
     // Always run Clerk middleware so auth() context is available in API routes.
     // clerkMiddleware by itself doesn't block unauthenticated users —
     // it just sets up the auth context. Route protection is handled inside
@@ -39,6 +46,7 @@ export default function middleware(request: NextRequest, event: NextFetchEvent) 
         return NextResponse.next();
     }
 
+    const clerkAuthMiddleware = createClerkAuthMiddleware();
     return clerkAuthMiddleware(request, event);
 }
 

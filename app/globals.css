@@ -1,6 +1,15 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Keep Tailwind scanning focused on app code only for faster local compiles. */
+@source "../app/**/*.{js,ts,jsx,tsx,mdx}";
+@source "../components/**/*.{js,ts,jsx,tsx,mdx}";
+@source "../lib/**/*.{js,ts,jsx,tsx,mdx}";
+@source not "../training/**";
+@source not "../training_imageset/**";
+@source not "../runs/**";
+@source not "../ALL SETUP/**";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

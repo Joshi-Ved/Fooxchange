@@ -7,9 +7,12 @@ const nextConfig: NextConfig = {
   // Security: Limit request body size to prevent DoS attacks
   experimental: {
     serverActions: {
-      bodySizeLimit: '50kb', // Strict limit for recipe metadata
+      bodySizeLimit: '50mb', // Allow image uploads for recipe scanning
     },
   },
+
+  // Turbopack config (Next.js 16 default bundler) - empty config silences conflict error
+  turbopack: {},
 
   // Allow external images from UploadThing and Clerk
   images: {
@@ -120,6 +123,26 @@ const nextConfig: NextConfig = {
         ],
       },
     ];
+  },
+
+  // Dev stability: ignore huge training/artifact folders during file watch.
+  webpack: (config, { dev }) => {
+    if (dev) {
+      config.watchOptions = {
+        ...(config.watchOptions ?? {}),
+        ignored: [
+          '**/.git/**',
+          '**/.next/**',
+          '**/.venv/**',
+          '**/training/**',
+          '**/training_imageset/**',
+          '**/runs/**',
+          '**/ALL SETUP/**',
+          '**/node_modules/**',
+        ],
+      };
+    }
+    return config;
   },
 };
 
